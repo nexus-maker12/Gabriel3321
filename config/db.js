@@ -71,8 +71,14 @@ async function autoSeedOrHydrate() {
   if (!isMongoConnected()) return;
 
   try {
-    const clientsCount = await models.Client.countDocuments();
-    if (clientsCount === 0 && (fs.existsSync(DB_PATH) || fs.existsSync(ORIGINAL_DB_PATH))) {
+    const [usersCount, rolesCount, ratesCount] = await Promise.all([
+      models.User.countDocuments(),
+      models.Role.countDocuments(),
+      models.Rates.countDocuments()
+    ]);
+    const isAtlasEmpty = (usersCount + rolesCount + ratesCount) === 0;
+
+    if (isAtlasEmpty && (fs.existsSync(DB_PATH) || fs.existsSync(ORIGINAL_DB_PATH))) {
       console.log('🌱 [DB] Base de datos en Mongo Atlas vacía. Sincronizando datos iniciales...');
       const sourceFile = fs.existsSync(DB_PATH) ? DB_PATH : ORIGINAL_DB_PATH;
       const raw = fs.readFileSync(sourceFile, 'utf-8');
@@ -118,7 +124,7 @@ async function autoSeedOrHydrate() {
         }
       }
       console.log('✅ [DB] ¡Datos iniciales sincronizados exitosamente en MongoDB Atlas!');
-    } else if (clientsCount > 0) {
+    } else {
       console.log('📥 [DB] MongoDB Atlas activo con datos existentes. Hidratando cache local...');
       const [
         rates,
