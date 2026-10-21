@@ -4,7 +4,7 @@ const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { connectDB, isMongoConnected, models } = require('./config/db');
+const { connectDB, isMongoConnected, fetchStateFromMongo, models } = require('./config/db');
 
 const app = express();
 const PORT = process.env.PORT || 3500;
@@ -28,41 +28,373 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Connect to MongoDB Atlas (if MONGODB_URI is provided in .env, otherwise fallback to local JSON)
+// Middleware to ensure Vercel rewrites preserve original request URL & query params
+app.use((req, res, next) => {
+  const matched = req.headers['x-matched-path'] || req.headers['x-now-route-matches'] || req.headers['x-vercel-matched-path'] || req.headers['x-forwarded-url'];
+  if (req.url.startsWith('/api/index.js') || req.url.startsWith('/api/[...all]') || req.url === '/api') {
+    const qIndex = req.url.indexOf('?');
+    const queryString = qIndex !== -1 ? req.url.substring(qIndex) : '';
+    if (matched && matched.startsWith('/api') && !matched.startsWith('/api/index') && !matched.startsWith('/api/[...all]')) {
+      req.url = matched + queryString;
+    } else if (req.query && req.query.all) {
+      const subpath = Array.isArray(req.query.all) ? req.query.all.join('/') : req.query.all;
+      req.url = '/api/' + subpath + queryString;
+    }
+  }
+  next();
+});
+
+const DEFAULT_ROLES = {
+  superadmin: {
+    id: 'superadmin',
+    name: 'Super Administrador (Dueño)',
+    badge: '👑 Super Admin',
+    color: '#d4af37',
+    description: 'Control absoluto e irrevocable de todo el sistema, finanzas, bóveda, usuarios y permisos',
+    isProtected: true,
+    permissions: {
+      dashboard: { canView: true, canEdit: true, canDelete: true, canExport: true },
+      puro: { canView: true, canEdit: true, canDelete: true, canExport: true },
+      inventario: { canView: true, canEdit: true, canDelete: true, canExport: true },
+      despacho: { canView: true, canEdit: true, canDelete: true, canExport: true },
+      joyerias: { canView: true, canEdit: true, canDelete: true, canExport: true },
+      'cartera-clientes': { canView: true, canEdit: true, canDelete: true, canExport: true },
+      proveedores: { canView: true, canEdit: true, canDelete: true, canExport: true },
+      cxc: { canView: true, canEdit: true, canDelete: true, canExport: true },
+      cxp: { canView: true, canEdit: true, canDelete: true, canExport: true },
+      remisiones: { canView: true, canEdit: true, canDelete: true, canExport: true },
+      'metodos-pago': { canView: true, canEdit: true, canDelete: true, canExport: true },
+      'cuadre-caja': { canView: true, canEdit: true, canDelete: true, canExport: true },
+      'balance-general': { canView: true, canEdit: true, canDelete: true, canExport: true },
+      'gastos-operativos': { canView: true, canEdit: true, canDelete: true, canExport: true },
+      usuarios: { canView: true, canEdit: true, canDelete: true, canExport: true }
+    }
+  },
+  admin: {
+    id: 'admin',
+    name: 'Administrador General',
+    badge: '⭐ Administrador',
+    color: '#38bdf8',
+    description: 'Gestión operacional y financiera completa de la empresa mayorista',
+    isProtected: false,
+    permissions: {
+      dashboard: { canView: true, canEdit: true, canDelete: true, canExport: true },
+      puro: { canView: true, canEdit: true, canDelete: false, canExport: true },
+      inventario: { canView: true, canEdit: true, canDelete: true, canExport: true },
+      despacho: { canView: true, canEdit: true, canDelete: true, canExport: true },
+      joyerias: { canView: true, canEdit: true, canDelete: true, canExport: true },
+      'cartera-clientes': { canView: true, canEdit: true, canDelete: false, canExport: true },
+      proveedores: { canView: true, canEdit: true, canDelete: true, canExport: true },
+      cxc: { canView: true, canEdit: true, canDelete: false, canExport: true },
+      cxp: { canView: true, canEdit: true, canDelete: false, canExport: true },
+      remisiones: { canView: true, canEdit: true, canDelete: false, canExport: true },
+      'metodos-pago': { canView: true, canEdit: true, canDelete: false, canExport: true },
+      'cuadre-caja': { canView: true, canEdit: true, canDelete: false, canExport: true },
+      'balance-general': { canView: true, canEdit: false, canDelete: false, canExport: true },
+      'gastos-operativos': { canView: true, canEdit: true, canDelete: true, canExport: true },
+      usuarios: { canView: true, canEdit: true, canDelete: false, canExport: true }
+    }
+  },
+  boveda: {
+    id: 'boveda',
+    name: 'Jefe de Bóveda & Joyería',
+    badge: '💎 Jefe de Bóveda',
+    color: '#fbbf24',
+    description: 'Custodia de metales, ingreso de prendas, pesaje de balanza y entrega a talleres',
+    isProtected: false,
+    permissions: {
+      dashboard: { canView: true, canEdit: false, canDelete: false, canExport: true },
+      puro: { canView: true, canEdit: true, canDelete: false, canExport: true },
+      inventario: { canView: true, canEdit: true, canDelete: false, canExport: true },
+      despacho: { canView: true, canEdit: true, canDelete: false, canExport: true },
+      joyerias: { canView: true, canEdit: false, canDelete: false, canExport: false },
+      'cartera-clientes': { canView: false, canEdit: false, canDelete: false, canExport: false },
+      proveedores: { canView: true, canEdit: true, canDelete: false, canExport: true },
+      cxc: { canView: false, canEdit: false, canDelete: false, canExport: false },
+      cxp: { canView: true, canEdit: true, canDelete: false, canExport: true },
+      remisiones: { canView: true, canEdit: false, canDelete: false, canExport: true },
+      'metodos-pago': { canView: false, canEdit: false, canDelete: false, canExport: false },
+      'cuadre-caja': { canView: false, canEdit: false, canDelete: false, canExport: false },
+      'balance-general': { canView: false, canEdit: false, canDelete: false, canExport: false },
+      'gastos-operativos': { canView: false, canEdit: false, canDelete: false, canExport: false },
+      usuarios: { canView: false, canEdit: false, canDelete: false, canExport: false }
+    }
+  },
+  comercial: {
+    id: 'comercial',
+    name: 'Asesor Comercial / Ventas',
+    badge: '💼 Comercial',
+    color: '#34d399',
+    description: 'Atención a joyerías, despacho en balanza, catálogo de piezas y remisiones',
+    isProtected: false,
+    permissions: {
+      dashboard: { canView: true, canEdit: false, canDelete: false, canExport: false },
+      puro: { canView: false, canEdit: false, canDelete: false, canExport: false },
+      inventario: { canView: true, canEdit: false, canDelete: false, canExport: false },
+      despacho: { canView: true, canEdit: true, canDelete: false, canExport: true },
+      joyerias: { canView: true, canEdit: true, canDelete: false, canExport: false },
+      'cartera-clientes': { canView: true, canEdit: false, canDelete: false, canExport: true },
+      proveedores: { canView: false, canEdit: false, canDelete: false, canExport: false },
+      cxc: { canView: true, canEdit: false, canDelete: false, canExport: false },
+      cxp: { canView: false, canEdit: false, canDelete: false, canExport: false },
+      remisiones: { canView: true, canEdit: false, canDelete: false, canExport: true },
+      'metodos-pago': { canView: false, canEdit: false, canDelete: false, canExport: false },
+      'cuadre-caja': { canView: false, canEdit: false, canDelete: false, canExport: false },
+      'balance-general': { canView: false, canEdit: false, canDelete: false, canExport: false },
+      'gastos-operativos': { canView: false, canEdit: false, canDelete: false, canExport: false },
+      usuarios: { canView: false, canEdit: false, canDelete: false, canExport: false }
+    }
+  },
+  cajero: {
+    id: 'cajero',
+    name: 'Caja & Facturación',
+    badge: '💵 Caja & Facturación',
+    color: '#06b6d4',
+    description: 'Cobros, abonos de joyerías, retal de oro, métodos de pago y arqueo de caja',
+    isProtected: false,
+    permissions: {
+      dashboard: { canView: true, canEdit: false, canDelete: false, canExport: false },
+      puro: { canView: false, canEdit: false, canDelete: false, canExport: false },
+      inventario: { canView: false, canEdit: false, canDelete: false, canExport: false },
+      despacho: { canView: false, canEdit: false, canDelete: false, canExport: false },
+      joyerias: { canView: true, canEdit: false, canDelete: false, canExport: false },
+      'cartera-clientes': { canView: true, canEdit: true, canDelete: false, canExport: true },
+      proveedores: { canView: false, canEdit: false, canDelete: false, canExport: false },
+      cxc: { canView: true, canEdit: true, canDelete: false, canExport: true },
+      cxp: { canView: false, canEdit: false, canDelete: false, canExport: false },
+      remisiones: { canView: true, canEdit: true, canDelete: false, canExport: true },
+      'metodos-pago': { canView: true, canEdit: true, canDelete: false, canExport: false },
+      'cuadre-caja': { canView: true, canEdit: true, canDelete: false, canExport: true },
+      'balance-general': { canView: false, canEdit: false, canDelete: false, canExport: false },
+      'gastos-operativos': { canView: true, canEdit: true, canDelete: false, canExport: true },
+      usuarios: { canView: false, canEdit: false, canDelete: false, canExport: false }
+    }
+  },
+  auditor: {
+    id: 'auditor',
+    name: 'Auditor Contable & Fiscal',
+    badge: '⚖️ Auditor NIIF',
+    color: '#a855f7',
+    description: 'Revisoría fiscal, balance general, auditoría de arqueos y gastos operativos (Solo Lectura)',
+    isProtected: false,
+    permissions: {
+      dashboard: { canView: true, canEdit: false, canDelete: false, canExport: true },
+      puro: { canView: true, canEdit: false, canDelete: false, canExport: true },
+      inventario: { canView: true, canEdit: false, canDelete: false, canExport: true },
+      despacho: { canView: false, canEdit: false, canDelete: false, canExport: false },
+      joyerias: { canView: true, canEdit: false, canDelete: false, canExport: true },
+      'cartera-clientes': { canView: true, canEdit: false, canDelete: false, canExport: true },
+      proveedores: { canView: true, canEdit: false, canDelete: false, canExport: true },
+      cxc: { canView: true, canEdit: false, canDelete: false, canExport: true },
+      cxp: { canView: true, canEdit: false, canDelete: false, canExport: true },
+      remisiones: { canView: true, canEdit: false, canDelete: false, canExport: true },
+      'metodos-pago': { canView: true, canEdit: false, canDelete: false, canExport: true },
+      'cuadre-caja': { canView: true, canEdit: false, canDelete: false, canExport: true },
+      'balance-general': { canView: true, canEdit: false, canDelete: false, canExport: true },
+      'gastos-operativos': { canView: true, canEdit: false, canDelete: false, canExport: true },
+      usuarios: { canView: false, canEdit: false, canDelete: false, canExport: false }
+    }
+  }
+};
+
+const AUTH_SECRET = process.env.SESSION_SECRET || 'nexus-secret-key-2026-production-secure-token';
+const activeSessions = new Map();
+
+function hashPassword(password, salt) {
+  if (!salt) salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+  return { hash, salt };
+}
+
+function verifyPassword(password, hash, salt) {
+  if (!password || !hash || !salt) return false;
+  const calc = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+  return calc === hash;
+}
+
+function createAuthToken(user, roleData) {
+  const payload = {
+    userId: user.id,
+    username: user.username,
+    role: user.role,
+    expiresAt: Date.now() + (30 * 24 * 60 * 60 * 1000) // 30 days
+  };
+  const payloadB64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const signature = crypto.createHmac('sha256', AUTH_SECRET).update(payloadB64).digest('base64url');
+  return `${payloadB64}.${signature}`;
+}
+
+function verifyAuthToken(token) {
+  if (!token || typeof token !== 'string') return null;
+  if (token.includes('.')) {
+    const parts = token.split('.');
+    if (parts.length === 2) {
+      const [payloadB64, signature] = parts;
+      const expectedSig = crypto.createHmac('sha256', AUTH_SECRET).update(payloadB64).digest('base64url');
+      if (signature === expectedSig) {
+        try {
+          const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf-8'));
+          if (payload.expiresAt && Date.now() <= payload.expiresAt) {
+            return payload;
+          }
+        } catch (e) {}
+      }
+    }
+  }
+  if (activeSessions.has(token)) {
+    const s = activeSessions.get(token);
+    if (Date.now() <= s.expiresAt) {
+      return { userId: s.userId, username: s.username, role: s.role };
+    }
+  }
+  return null;
+}
+
+function ensureDBShape(db) {
+  if (!db || typeof db !== 'object') db = {};
+  if (!db.rates || typeof db.rates !== 'object') db.rates = {};
+  if (!db.puro24k || typeof db.puro24k !== 'object') db.puro24k = { stockGrams: 0, purchases: [], deliveries: [] };
+  if (!Array.isArray(db.puro24k.purchases)) db.puro24k.purchases = [];
+  if (!Array.isArray(db.puro24k.deliveries)) db.puro24k.deliveries = [];
+  if (!Array.isArray(db.items)) db.items = [];
+  if (!Array.isArray(db.clients)) db.clients = [];
+  if (!Array.isArray(db.suppliers)) db.suppliers = [];
+  if (!Array.isArray(db.orders)) db.orders = [];
+  if (!Array.isArray(db.payments)) db.payments = [];
+  if (!Array.isArray(db.categories)) db.categories = [];
+  if (!Array.isArray(db.paymentMethods)) db.paymentMethods = [];
+  if (!Array.isArray(db.cashMovements)) db.cashMovements = [];
+  if (!Array.isArray(db.users)) db.users = [];
+  if (!db.roles || typeof db.roles !== 'object') db.roles = JSON.parse(JSON.stringify(DEFAULT_ROLES));
+  initAuth(db);
+  return db;
+}
+
+function initAuth(db) {
+  let modified = false;
+  if (!db.roles || typeof db.roles !== 'object') {
+    db.roles = JSON.parse(JSON.stringify(DEFAULT_ROLES));
+    modified = true;
+  } else {
+    Object.keys(DEFAULT_ROLES).forEach(rKey => {
+      if (!db.roles[rKey]) {
+        db.roles[rKey] = JSON.parse(JSON.stringify(DEFAULT_ROLES[rKey]));
+        modified = true;
+      }
+    });
+  }
+
+  if (!Array.isArray(db.users)) {
+    db.users = [];
+    modified = true;
+  }
+
+  let superadmin = db.users.find(u => u.role === 'superadmin' || u.username === 'superadmin' || u.username === 'admin');
+  if (!superadmin) {
+    const { hash, salt } = hashPassword('nexus2026!');
+    superadmin = {
+      id: 'usr-superadmin',
+      name: 'Super Administrador (Dueño)',
+      username: 'superadmin',
+      email: 'admin@nexusjoyas.com',
+      role: 'superadmin',
+      passwordHash: hash,
+      salt: salt,
+      status: 'activo',
+      phone: '+57 300 000 0000',
+      createdAt: new Date().toISOString(),
+      lastLogin: null
+    };
+    db.users.unshift(superadmin);
+    modified = true;
+  }
+
+  return modified;
+}
+
+// Middleware: Ensure MongoDB is connected and cacheDB is hydrated before handling any API request
+app.use(async (req, res, next) => {
+  if (req.url.startsWith('/api/')) {
+    if (!isMongoConnected()) {
+      try {
+        await connectDB();
+      } catch (e) {}
+    }
+    try {
+      await getDB();
+    } catch (e) {}
+  }
+  next();
+});
+
+// Initial connection attempt
 connectDB();
 
-// Helper to read database
-function readDB() {
+let cacheDB = null;
+let lastCacheTime = 0;
+const CACHE_TTL_MS = 1500;
+
+function readLocalJSON() {
   try {
     if (!fs.existsSync(DB_PATH)) {
-      return { rates: {}, puro24k: { stockGrams: 0, purchases: [], deliveries: [] }, items: [], clients: [], suppliers: [], orders: [], payments: [] };
+      return ensureDBShape({});
     }
     const data = fs.readFileSync(DB_PATH, 'utf-8');
-    return JSON.parse(data);
+    return ensureDBShape(JSON.parse(data));
   } catch (err) {
     console.error('Error reading database:', err);
-    return { rates: {}, puro24k: { stockGrams: 0, purchases: [], deliveries: [] }, items: [], clients: [], suppliers: [], orders: [], payments: [] };
+    return ensureDBShape({});
   }
 }
 
-// Helper to write database (writes to JSON and asynchronously syncs with Atlas if connected)
-function writeDB(data) {
+function readDB() {
+  return cacheDB || readLocalJSON();
+}
+
+async function getDB() {
+  if (isMongoConnected()) {
+    const now = Date.now();
+    if (cacheDB && (now - lastCacheTime < CACHE_TTL_MS)) {
+      return cacheDB;
+    }
+    try {
+      const state = await fetchStateFromMongo();
+      if (state) {
+        cacheDB = ensureDBShape(state);
+        lastCacheTime = now;
+        try {
+          fs.writeFileSync(DB_PATH, JSON.stringify(cacheDB, null, 2), 'utf-8');
+        } catch (e) {}
+        return cacheDB;
+      }
+    } catch (err) {
+      console.warn('[DB] Error fetching from Atlas, using cache/local:', err.message);
+    }
+  }
+  return cacheDB || readLocalJSON();
+}
+
+// Awaited, fully synchronized writeDB
+async function writeDB(data) {
+  ensureDBShape(data);
+  cacheDB = data;
+  lastCacheTime = Date.now();
+
   try {
     fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2), 'utf-8');
-    
-    // Asynchronous background sync to Atlas if connected
-    if (isMongoConnected()) {
-      syncStateToMongo(data).catch(err => console.warn('Atlas Sync Warning:', err.message));
-    }
-    return true;
   } catch (err) {
-    console.error('Error writing database:', err);
-    return false;
+    console.warn('[DB] File write warning:', err.message);
   }
-}
 
-let isSyncing = false;
-let pendingSync = null;
+  if (isMongoConnected()) {
+    try {
+      await syncStateToMongo(data);
+    } catch (err) {
+      console.warn('⚠️ [Atlas Sync Warning]:', err.message);
+    }
+  }
+  return true;
+}
 
 async function syncArrayCollection(Model, list) {
   if (!Array.isArray(list)) return;
@@ -85,27 +417,20 @@ async function syncArrayCollection(Model, list) {
 }
 
 async function syncStateToMongo(db) {
-  if (!isMongoConnected()) return;
-
-  if (isSyncing) {
-    pendingSync = db;
-    return;
-  }
-
-  isSyncing = true;
+  if (!isMongoConnected() || !db) return;
   try {
     const tasks = [];
     if (db.rates) tasks.push(models.Rates.findOneAndUpdate({}, db.rates, { upsert: true }));
     if (db.puro24k) tasks.push(models.Puro24k.findOneAndUpdate({}, db.puro24k, { upsert: true }));
-    if (db.items) tasks.push(syncArrayCollection(models.Item, db.items));
-    if (db.clients) tasks.push(syncArrayCollection(models.Client, db.clients));
-    if (db.suppliers) tasks.push(syncArrayCollection(models.Supplier, db.suppliers));
-    if (db.orders) tasks.push(syncArrayCollection(models.Order, db.orders));
-    if (db.payments) tasks.push(syncArrayCollection(models.Payment, db.payments));
-    if (db.categories) tasks.push(syncArrayCollection(models.Category, db.categories));
-    if (db.paymentMethods) tasks.push(syncArrayCollection(models.PaymentMethod, db.paymentMethods));
-    if (db.cashMovements) tasks.push(syncArrayCollection(models.CashMovement, db.cashMovements));
-    if (db.users) tasks.push(syncArrayCollection(models.User, db.users));
+    if (Array.isArray(db.items)) tasks.push(syncArrayCollection(models.Item, db.items));
+    if (Array.isArray(db.clients)) tasks.push(syncArrayCollection(models.Client, db.clients));
+    if (Array.isArray(db.suppliers)) tasks.push(syncArrayCollection(models.Supplier, db.suppliers));
+    if (Array.isArray(db.orders)) tasks.push(syncArrayCollection(models.Order, db.orders));
+    if (Array.isArray(db.payments)) tasks.push(syncArrayCollection(models.Payment, db.payments));
+    if (Array.isArray(db.categories)) tasks.push(syncArrayCollection(models.Category, db.categories));
+    if (Array.isArray(db.paymentMethods)) tasks.push(syncArrayCollection(models.PaymentMethod, db.paymentMethods));
+    if (Array.isArray(db.cashMovements)) tasks.push(syncArrayCollection(models.CashMovement, db.cashMovements));
+    if (Array.isArray(db.users)) tasks.push(syncArrayCollection(models.User, db.users));
     if (db.roles) {
       const rolesArr = Array.isArray(db.roles) ? db.roles : Object.values(db.roles);
       tasks.push(syncArrayCollection(models.Role, rolesArr));
@@ -114,13 +439,6 @@ async function syncStateToMongo(db) {
     await Promise.all(tasks);
   } catch (err) {
     console.warn('⚠️ [Atlas Sync Warning]:', err.message);
-  } finally {
-    isSyncing = false;
-    if (pendingSync) {
-      const nextDb = pendingSync;
-      pendingSync = null;
-      syncStateToMongo(nextDb).catch(e => console.warn(e.message));
-    }
   }
 }
 
@@ -277,8 +595,8 @@ app.get('/api/rates', (req, res) => {
   });
 });
 
-app.post('/api/rates', (req, res) => {
-  const db = readDB();
+app.post('/api/rates', async (req, res) => {
+  const db = await getDB();
   db.rates = db.rates || {};
   const { promedioPuro24k, promedioNacional, promedioItaliano, retal_oro18k_compra, resetOverrides } = req.body;
 
@@ -316,7 +634,61 @@ app.post('/api/rates', (req, res) => {
   }
 
   db.rates.last_updated = new Date().toISOString();
-  writeDB(db);
+  await writeDB(db);
+
+  const averages = calculateAverages(db);
+  res.json({
+    success: true,
+    rates: {
+      ...db.rates,
+      promedioPuro24k: averages.promedioPuro24k,
+      promedioItaliano: averages.promedioItaliano,
+      promedioNacional: averages.promedioNacional
+    },
+    message: 'Tasas actualizadas exitosamente.'
+  });
+});
+
+app.put('/api/rates', async (req, res) => {
+  const db = await getDB();
+  db.rates = db.rates || {};
+  const { promedioPuro24k, promedioNacional, promedioItaliano, retal_oro18k_compra, resetOverrides } = req.body;
+
+  if (resetOverrides) {
+    delete db.rates.override_promedioPuro24k;
+    delete db.rates.override_promedioNacional;
+    delete db.rates.override_promedioItaliano;
+  } else {
+    if (promedioPuro24k !== undefined && promedioPuro24k !== '') {
+      const val = Number(promedioPuro24k);
+      if (!isNaN(val) && val >= 0) {
+        db.rates.override_promedioPuro24k = val;
+        db.rates.oro24k_fino_benchmark = val;
+      }
+    }
+    if (promedioNacional !== undefined && promedioNacional !== '') {
+      const val = Number(promedioNacional);
+      if (!isNaN(val) && val >= 0) {
+        db.rates.override_promedioNacional = val;
+        db.rates.oro18k_nacional_base = val;
+      }
+    }
+    if (promedioItaliano !== undefined && promedioItaliano !== '') {
+      const val = Number(promedioItaliano);
+      if (!isNaN(val) && val >= 0) {
+        db.rates.override_promedioItaliano = val;
+        db.rates.oro18k_italiano_base = val;
+      }
+    }
+  }
+
+  if (retal_oro18k_compra !== undefined && retal_oro18k_compra !== '') {
+    const val = Number(retal_oro18k_compra);
+    if (!isNaN(val) && val >= 0) db.rates.retal_oro18k_compra = val;
+  }
+
+  db.rates.last_updated = new Date().toISOString();
+  await writeDB(db);
 
   const averages = calculateAverages(db);
   res.json({
@@ -343,8 +715,8 @@ app.get('/api/puro', (req, res) => {
 });
 
 // Registrar Compra de Puro 24K (Granalla/Lingotes)
-app.post('/api/puro/purchase', (req, res) => {
-  const db = readDB();
+app.post('/api/puro/purchase', async (req, res) => {
+  const db = await getDB();
   if (!db.puro24k) db.puro24k = { stockGrams: 0, purchases: [], deliveries: [] };
 
   const grams = Number(req.body.grams) || 0;
@@ -372,14 +744,14 @@ app.post('/api/puro/purchase', (req, res) => {
   db.puro24k.stockGrams = Number(((Number(db.puro24k.stockGrams) || 0) + grams).toFixed(2));
   db.puro24k.purchases.unshift(purchase);
 
-  writeDB(db);
+  await writeDB(db);
   const averages = calculateAverages(db);
   res.status(201).json({ success: true, purchase, newPuroStock: db.puro24k.stockGrams, newAverageCost: averages.promedioPuro24k });
 });
 
 // Registrar Entrega de Puro 24K a Taller / Proveedor
-app.post('/api/puro/deliver', (req, res) => {
-  const db = readDB();
+app.post('/api/puro/deliver', async (req, res) => {
+  const db = await getDB();
   if (!db.puro24k) db.puro24k = { stockGrams: 0, purchases: [], deliveries: [] };
 
   const grams24k = Number(req.body.grams24k) || 0;
@@ -416,14 +788,14 @@ app.post('/api/puro/deliver', (req, res) => {
   };
 
   db.puro24k.deliveries.unshift(deliveryRecord);
-  writeDB(db);
+  await writeDB(db);
 
   res.status(201).json({ success: true, delivery: deliveryRecord, supplier });
 });
 
 // Registrar Recepción de Joyería Terminada de Taller (Cobra Mano de Obra)
-app.post('/api/puro/receive', (req, res) => {
-  const db = readDB();
+app.post('/api/puro/receive', async (req, res) => {
+  const db = await getDB();
   const {
     supplierId,
     grams24kUsed,
@@ -506,7 +878,7 @@ app.post('/api/puro/receive', (req, res) => {
   if (!db.puro24k) db.puro24k = { stockGrams: 0, purchases: [], deliveries: [] };
   db.puro24k.deliveries.unshift(deliveryRecord);
 
-  writeDB(db);
+  await writeDB(db);
   res.status(201).json({ success: true, item: newItem, delivery: deliveryRecord, supplier });
 });
 
@@ -531,8 +903,8 @@ app.get('/api/items', (req, res) => {
   res.json({ success: true, items: list });
 });
 
-app.post('/api/items', (req, res) => {
-  const db = readDB();
+app.post('/api/items', async (req, res) => {
+  const db = await getDB();
   const averages = calculateAverages(db);
 
   const category = req.body.category || 'italiano';
@@ -554,12 +926,12 @@ app.post('/api/items', (req, res) => {
   };
 
   db.items.unshift(newItem);
-  writeDB(db);
+  await writeDB(db);
   res.status(201).json({ success: true, item: newItem });
 });
 
-app.put('/api/items/:id', (req, res) => {
-  const db = readDB();
+app.put('/api/items/:id', async (req, res) => {
+  const db = await getDB();
   const idx = db.items.findIndex(i => i.id === req.params.id);
   if (idx === -1) {
     return res.status(404).json({ success: false, message: 'Prenda no encontrada' });
@@ -579,14 +951,14 @@ app.put('/api/items/:id', (req, res) => {
   delete db.items[idx].pricePerGram;
   delete db.items[idx].minPricePerGram;
 
-  writeDB(db);
+  await writeDB(db);
   res.json({ success: true, item: db.items[idx] });
 });
 
-app.delete('/api/items/:id', (req, res) => {
-  const db = readDB();
+app.delete('/api/items/:id', async (req, res) => {
+  const db = await getDB();
   db.items = db.items.filter(i => i.id !== req.params.id);
-  writeDB(db);
+  await writeDB(db);
   res.json({ success: true, message: 'Lote retirado de inventario' });
 });
 
@@ -604,8 +976,8 @@ function slugifyCategory(text) {
 }
 
 // 4.1 Categories (Categorías dinámicas de prendas/lotes)
-app.get('/api/categories', (req, res) => {
-  const db = readDB();
+app.get('/api/categories', async (req, res) => {
+  const db = await getDB();
   if (!db.categories || !Array.isArray(db.categories) || db.categories.length === 0) {
     db.categories = [
       {
@@ -627,13 +999,13 @@ app.get('/api/categories', (req, res) => {
         description: "Prendas vaciadas y manufacturadas en talleres colombianos"
       }
     ];
-    writeDB(db);
+    await writeDB(db);
   }
   res.json({ success: true, categories: db.categories });
 });
 
-app.post('/api/categories', (req, res) => {
-  const db = readDB();
+app.post('/api/categories', async (req, res) => {
+  const db = await getDB();
   db.categories = db.categories || [];
 
   const name = (req.body.name || '').trim();
@@ -662,12 +1034,12 @@ app.post('/api/categories', (req, res) => {
   };
 
   db.categories.push(newCat);
-  writeDB(db);
+  await writeDB(db);
   res.status(201).json({ success: true, category: newCat });
 });
 
-app.put('/api/categories/:id', (req, res) => {
-  const db = readDB();
+app.put('/api/categories/:id', async (req, res) => {
+  const db = await getDB();
   db.categories = db.categories || [];
   const idx = db.categories.findIndex(c => c.id === req.params.id);
   if (idx === -1) {
@@ -699,12 +1071,12 @@ app.put('/api/categories/:id', (req, res) => {
     description: req.body.description !== undefined ? req.body.description.trim() : db.categories[idx].description
   };
 
-  writeDB(db);
+  await writeDB(db);
   res.json({ success: true, category: db.categories[idx] });
 });
 
-app.delete('/api/categories/:id', (req, res) => {
-  const db = readDB();
+app.delete('/api/categories/:id', async (req, res) => {
+  const db = await getDB();
   db.categories = db.categories || [];
   const target = db.categories.find(c => c.id === req.params.id);
   if (!target) {
@@ -730,7 +1102,7 @@ app.delete('/api/categories/:id', (req, res) => {
     });
   }
 
-  writeDB(db);
+  await writeDB(db);
   res.json({ 
     success: true, 
     message: `Categoría "${target.name}" eliminada correctamente.${reassignedCount > 0 ? ` ${reassignedCount} lotes reasignados a "${fallbackCat}".` : ''}` 
@@ -743,12 +1115,19 @@ app.get('/api/clients', (req, res) => {
   res.json({ success: true, clients: db.clients || [] });
 });
 
-app.post('/api/clients', (req, res) => {
-  const db = readDB();
+app.post('/api/clients', async (req, res) => {
+  const db = await getDB();
+  const tradeName = (req.body.tradeName || req.body.name || '').trim();
+  const name = (req.body.name || tradeName).trim();
+
+  if (!tradeName) {
+    return res.status(400).json({ success: false, message: 'La razón social o nombre comercial es obligatoria.' });
+  }
+
   const newClient = {
     id: 'cli-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
-    name: req.body.name,
-    tradeName: req.body.tradeName || req.body.name,
+    name: name,
+    tradeName: tradeName,
     documentType: req.body.documentType || 'NIT',
     documentNumber: req.body.documentNumber || '',
     phone: req.body.phone || '',
@@ -762,13 +1141,13 @@ app.post('/api/clients', (req, res) => {
     lastPaymentDate: new Date().toISOString().split('T')[0]
   };
 
-  db.clients.push(newClient);
-  writeDB(db);
+  db.clients.unshift(newClient);
+  await writeDB(db);
   res.status(201).json({ success: true, client: newClient });
 });
 
-app.put('/api/clients/:id', (req, res) => {
-  const db = readDB();
+app.put('/api/clients/:id', async (req, res) => {
+  const db = await getDB();
   const idx = db.clients.findIndex(c => c.id === req.params.id);
   if (idx === -1) return res.status(404).json({ success: false, message: 'Joyería no encontrada' });
 
@@ -777,17 +1156,19 @@ app.put('/api/clients/:id', (req, res) => {
     ...cl,
     ...req.body,
     id: cl.id,
+    name: req.body.name !== undefined ? req.body.name.trim() : cl.name,
+    tradeName: req.body.tradeName !== undefined ? req.body.tradeName.trim() : cl.tradeName,
     creditLimitPesos: isNaN(Number(req.body.creditLimitPesos)) ? cl.creditLimitPesos : Math.max(0, Number(req.body.creditLimitPesos)),
     creditLimitGrams: isNaN(Number(req.body.creditLimitGrams)) ? cl.creditLimitGrams : Math.max(0, Number(req.body.creditLimitGrams)),
     currentDebtPesos: isNaN(Number(req.body.currentDebtPesos)) ? cl.currentDebtPesos : Math.max(0, Number(req.body.currentDebtPesos)),
     currentDebtGrams: isNaN(Number(req.body.currentDebtGrams)) ? cl.currentDebtGrams : Math.max(0, Number(req.body.currentDebtGrams))
   };
-  writeDB(db);
+  await writeDB(db);
   res.json({ success: true, client: db.clients[idx], message: 'Joyería actualizada correctamente' });
 });
 
-app.delete('/api/clients/:id', (req, res) => {
-  const db = readDB();
+app.delete('/api/clients/:id', async (req, res) => {
+  const db = await getDB();
   const client = db.clients.find(c => c.id === req.params.id);
   if (!client) return res.status(404).json({ success: false, message: 'Joyería no encontrada' });
 
@@ -799,7 +1180,7 @@ app.delete('/api/clients/:id', (req, res) => {
   }
 
   db.clients = db.clients.filter(c => c.id !== req.params.id);
-  writeDB(db);
+  await writeDB(db);
   res.json({ success: true, message: `Joyería "${client.tradeName || client.name}" eliminada correctamente` });
 });
 
@@ -809,11 +1190,11 @@ app.get('/api/suppliers', (req, res) => {
   res.json({ success: true, suppliers: db.suppliers || [] });
 });
 
-app.post('/api/suppliers', (req, res) => {
-  const db = readDB();
+app.post('/api/suppliers', async (req, res) => {
+  const db = await getDB();
   const newSupplier = {
     id: 'sup-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
-    name: req.body.name,
+    name: (req.body.name || '').trim(),
     contact: req.body.contact || '',
     category: req.body.category || 'Taller Nacional / Vaciado',
     phone: req.body.phone || '',
@@ -826,13 +1207,13 @@ app.post('/api/suppliers', (req, res) => {
     status: 'activo'
   };
 
-  db.suppliers.push(newSupplier);
-  writeDB(db);
+  db.suppliers.unshift(newSupplier);
+  await writeDB(db);
   res.status(201).json({ success: true, supplier: newSupplier });
 });
 
-app.put('/api/suppliers/:id', (req, res) => {
-  const db = readDB();
+app.put('/api/suppliers/:id', async (req, res) => {
+  const db = await getDB();
   const idx = db.suppliers.findIndex(s => s.id === req.params.id);
   if (idx === -1) return res.status(404).json({ success: false, message: 'Proveedor no encontrado' });
 
@@ -841,18 +1222,19 @@ app.put('/api/suppliers/:id', (req, res) => {
     ...sup,
     ...req.body,
     id: sup.id,
+    name: req.body.name ? req.body.name.trim() : sup.name,
     manoDeObraPerGram: isNaN(Number(req.body.manoDeObraPerGram)) ? sup.manoDeObraPerGram : Math.max(0, Number(req.body.manoDeObraPerGram)),
     balanceDuePesos: isNaN(Number(req.body.balanceDuePesos)) ? sup.balanceDuePesos : Math.max(0, Number(req.body.balanceDuePesos)),
     balanceDueGrams: isNaN(Number(req.body.balanceDueGrams)) ? sup.balanceDueGrams : Math.max(0, Number(req.body.balanceDueGrams)),
     puroInHandsGrams: isNaN(Number(req.body.puroInHandsGrams)) ? sup.puroInHandsGrams : Math.max(0, Number(req.body.puroInHandsGrams)),
     balanceManoDeObra: isNaN(Number(req.body.balanceManoDeObra)) ? sup.balanceManoDeObra : Math.max(0, Number(req.body.balanceManoDeObra))
   };
-  writeDB(db);
+  await writeDB(db);
   res.json({ success: true, supplier: db.suppliers[idx], message: 'Proveedor actualizado correctamente' });
 });
 
-app.delete('/api/suppliers/:id', (req, res) => {
-  const db = readDB();
+app.delete('/api/suppliers/:id', async (req, res) => {
+  const db = await getDB();
   const supplier = db.suppliers.find(s => s.id === req.params.id);
   if (!supplier) return res.status(404).json({ success: false, message: 'Proveedor no encontrado' });
 
@@ -866,7 +1248,7 @@ app.delete('/api/suppliers/:id', (req, res) => {
   }
 
   db.suppliers = db.suppliers.filter(s => s.id !== req.params.id);
-  writeDB(db);
+  await writeDB(db);
   res.json({ success: true, message: `Proveedor / Taller "${supplier.name}" eliminado correctamente` });
 });
 
@@ -876,8 +1258,8 @@ app.get('/api/orders', (req, res) => {
   res.json({ success: true, orders: db.orders || [] });
 });
 
-app.post('/api/orders', (req, res) => {
-  const db = readDB();
+app.post('/api/orders', async (req, res) => {
+  const db = await getDB();
   const { clientId, items, paymentType, paymentDetail, notes } = req.body;
 
   if (!items || !items.length) {
@@ -985,7 +1367,7 @@ app.post('/api/orders', (req, res) => {
   }
 
   db.orders.unshift(newOrder);
-  writeDB(db);
+  await writeDB(db);
 
   res.status(201).json({ success: true, order: newOrder, client });
 });
@@ -996,8 +1378,8 @@ app.get('/api/payments', (req, res) => {
   res.json({ success: true, payments: db.payments || [] });
 });
 
-app.post('/api/payments', (req, res) => {
-  const db = readDB();
+app.post('/api/payments', async (req, res) => {
+  const db = await getDB();
   const {
     type,
     entityId,
@@ -1066,7 +1448,7 @@ app.post('/api/payments', (req, res) => {
   };
 
   db.payments.unshift(newPayment);
-  writeDB(db);
+  await writeDB(db);
 
   res.status(201).json({ success: true, payment: newPayment });
 });
@@ -1167,20 +1549,19 @@ const DEFAULT_PAYMENT_METHODS = [
 
 function ensurePaymentMethods(db) {
   if (!db.paymentMethods || !Array.isArray(db.paymentMethods) || db.paymentMethods.length === 0) {
-    db.paymentMethods = [...DEFAULT_PAYMENT_METHODS];
-    writeDB(db);
+    db.paymentMethods = JSON.parse(JSON.stringify(DEFAULT_PAYMENT_METHODS));
   }
   return db.paymentMethods;
 }
 
-app.get('/api/payment-methods', (req, res) => {
-  const db = readDB();
+app.get('/api/payment-methods', async (req, res) => {
+  const db = await getDB();
   const paymentMethods = ensurePaymentMethods(db);
   res.json({ success: true, paymentMethods });
 });
 
-app.post('/api/payment-methods', (req, res) => {
-  const db = readDB();
+app.post('/api/payment-methods', async (req, res) => {
+  const db = await getDB();
   ensurePaymentMethods(db);
 
   const {
@@ -1225,13 +1606,13 @@ app.post('/api/payment-methods', (req, res) => {
   }
 
   db.paymentMethods.push(newMethod);
-  writeDB(db);
+  await writeDB(db);
 
   res.status(201).json({ success: true, paymentMethod: newMethod, message: 'Método de pago registrado exitosamente.' });
 });
 
-app.put('/api/payment-methods/:id', (req, res) => {
-  const db = readDB();
+app.put('/api/payment-methods/:id', async (req, res) => {
+  const db = await getDB();
   ensurePaymentMethods(db);
 
   const idx = db.paymentMethods.findIndex(m => m.id === req.params.id);
@@ -1259,12 +1640,12 @@ app.put('/api/payment-methods/:id', (req, res) => {
     isDefault
   };
 
-  writeDB(db);
+  await writeDB(db);
   res.json({ success: true, paymentMethod: db.paymentMethods[idx], message: 'Método de pago actualizado exitosamente.' });
 });
 
-app.patch('/api/payment-methods/:id/toggle', (req, res) => {
-  const db = readDB();
+app.patch('/api/payment-methods/:id/toggle', async (req, res) => {
+  const db = await getDB();
   ensurePaymentMethods(db);
 
   const method = db.paymentMethods.find(m => m.id === req.params.id);
@@ -1273,13 +1654,13 @@ app.patch('/api/payment-methods/:id/toggle', (req, res) => {
   }
 
   method.status = method.status === 'activo' ? 'inactivo' : 'activo';
-  writeDB(db);
+  await writeDB(db);
 
   res.json({ success: true, paymentMethod: method, message: `Método ${method.name} marcado como ${method.status}.` });
 });
 
-app.delete('/api/payment-methods/:id', (req, res) => {
-  const db = readDB();
+app.delete('/api/payment-methods/:id', async (req, res) => {
+  const db = await getDB();
   ensurePaymentMethods(db);
 
   const method = db.paymentMethods.find(m => m.id === req.params.id);
@@ -1293,7 +1674,7 @@ app.delete('/api/payment-methods/:id', (req, res) => {
   }
 
   db.paymentMethods = db.paymentMethods.filter(m => m.id !== req.params.id);
-  writeDB(db);
+  await writeDB(db);
 
   res.json({ success: true, message: `Método de pago "${method.name}" eliminado correctamente.` });
 });
@@ -1629,8 +2010,8 @@ app.get('/api/cuadre-caja', (req, res) => {
   });
 });
 
-app.post('/api/cash-movements', (req, res) => {
-  const db = readDB();
+app.post('/api/cash-movements', async (req, res) => {
+  const db = await getDB();
   if (!db.cashMovements) db.cashMovements = [];
 
   const { type, category, concept, amount, method, reference, notes, date } = req.body;
@@ -1651,13 +2032,13 @@ app.post('/api/cash-movements', (req, res) => {
   };
 
   db.cashMovements.unshift(mov);
-  writeDB(db);
+  await writeDB(db);
 
   res.status(201).json({ success: true, movement: mov, message: 'Movimiento de caja registrado exitosamente.' });
 });
 
-app.delete('/api/cash-movements/:id', (req, res) => {
-  const db = readDB();
+app.delete('/api/cash-movements/:id', async (req, res) => {
+  const db = await getDB();
   if (!db.cashMovements) db.cashMovements = [];
 
   const mov = db.cashMovements.find(m => m.id === req.params.id);
@@ -1666,7 +2047,7 @@ app.delete('/api/cash-movements/:id', (req, res) => {
   }
 
   db.cashMovements = db.cashMovements.filter(m => m.id !== req.params.id);
-  writeDB(db);
+  await writeDB(db);
 
   res.json({ success: true, message: 'Movimiento de caja eliminado.' });
 });
@@ -1823,8 +2204,8 @@ app.get('/api/gastos-operativos', (req, res) => {
   });
 });
 
-app.post('/api/gastos-operativos', (req, res) => {
-  const db = readDB();
+app.post('/api/gastos-operativos', async (req, res) => {
+  const db = await getDB();
   if (!db.cashMovements) db.cashMovements = [];
 
   const { date, category, concept, amount, method, reference, beneficiary, notes } = req.body;
@@ -1847,13 +2228,13 @@ app.post('/api/gastos-operativos', (req, res) => {
   };
 
   db.cashMovements.unshift(newExpense);
-  writeDB(db);
+  await writeDB(db);
 
   res.status(201).json({ success: true, expense: newExpense, message: 'Gasto operativo registrado exitosamente.' });
 });
 
-app.put('/api/gastos-operativos/:id', (req, res) => {
-  const db = readDB();
+app.put('/api/gastos-operativos/:id', async (req, res) => {
+  const db = await getDB();
   if (!db.cashMovements) db.cashMovements = [];
 
   const idx = db.cashMovements.findIndex(m => m.id === req.params.id);
@@ -1884,12 +2265,12 @@ app.put('/api/gastos-operativos/:id', (req, res) => {
     notes: req.body.notes !== undefined ? req.body.notes.trim() : existing.notes
   };
 
-  writeDB(db);
+  await writeDB(db);
   res.json({ success: true, expense: db.cashMovements[idx], message: 'Gasto operativo actualizado exitosamente.' });
 });
 
-app.delete('/api/gastos-operativos/:id', (req, res) => {
-  const db = readDB();
+app.delete('/api/gastos-operativos/:id', async (req, res) => {
+  const db = await getDB();
   if (!db.cashMovements) db.cashMovements = [];
 
   const exp = db.cashMovements.find(m => m.id === req.params.id);
@@ -1898,7 +2279,7 @@ app.delete('/api/gastos-operativos/:id', (req, res) => {
   }
 
   db.cashMovements = db.cashMovements.filter(m => m.id !== req.params.id);
-  writeDB(db);
+  await writeDB(db);
 
   res.json({ success: true, message: 'Gasto operativo eliminado correctamente.' });
 });
@@ -2086,222 +2467,9 @@ app.get('/api/balance-general', (req, res) => {
 // MÓDULO DE AUTENTICACIÓN, USUARIOS & CONTROL DE ACCESO (RBAC)
 // =========================================================
 
-function hashPassword(password, salt) {
-  if (!salt) salt = crypto.randomBytes(16).toString('hex');
-  const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
-  return { hash, salt };
-}
-
-function verifyPassword(password, hash, salt) {
-  if (!password || !hash || !salt) return false;
-  const calc = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
-  return calc === hash;
-}
-
-const DEFAULT_ROLES = {
-  superadmin: {
-    id: 'superadmin',
-    name: 'Super Administrador (Dueño)',
-    badge: '👑 Super Admin',
-    color: '#d4af37',
-    description: 'Control absoluto e irrevocable de todo el sistema, finanzas, bóveda, usuarios y permisos',
-    isProtected: true,
-    permissions: {
-      dashboard: { canView: true, canEdit: true, canDelete: true, canExport: true },
-      puro: { canView: true, canEdit: true, canDelete: true, canExport: true },
-      inventario: { canView: true, canEdit: true, canDelete: true, canExport: true },
-      despacho: { canView: true, canEdit: true, canDelete: true, canExport: true },
-      joyerias: { canView: true, canEdit: true, canDelete: true, canExport: true },
-      'cartera-clientes': { canView: true, canEdit: true, canDelete: true, canExport: true },
-      proveedores: { canView: true, canEdit: true, canDelete: true, canExport: true },
-      cxc: { canView: true, canEdit: true, canDelete: true, canExport: true },
-      cxp: { canView: true, canEdit: true, canDelete: true, canExport: true },
-      remisiones: { canView: true, canEdit: true, canDelete: true, canExport: true },
-      'metodos-pago': { canView: true, canEdit: true, canDelete: true, canExport: true },
-      'cuadre-caja': { canView: true, canEdit: true, canDelete: true, canExport: true },
-      'balance-general': { canView: true, canEdit: true, canDelete: true, canExport: true },
-      'gastos-operativos': { canView: true, canEdit: true, canDelete: true, canExport: true },
-      usuarios: { canView: true, canEdit: true, canDelete: true, canExport: true }
-    }
-  },
-  admin: {
-    id: 'admin',
-    name: 'Administrador General',
-    badge: '⭐ Administrador',
-    color: '#38bdf8',
-    description: 'Gestión operacional y financiera completa de la empresa mayorista',
-    isProtected: false,
-    permissions: {
-      dashboard: { canView: true, canEdit: true, canDelete: true, canExport: true },
-      puro: { canView: true, canEdit: true, canDelete: false, canExport: true },
-      inventario: { canView: true, canEdit: true, canDelete: true, canExport: true },
-      despacho: { canView: true, canEdit: true, canDelete: true, canExport: true },
-      joyerias: { canView: true, canEdit: true, canDelete: true, canExport: true },
-      'cartera-clientes': { canView: true, canEdit: true, canDelete: false, canExport: true },
-      proveedores: { canView: true, canEdit: true, canDelete: true, canExport: true },
-      cxc: { canView: true, canEdit: true, canDelete: false, canExport: true },
-      cxp: { canView: true, canEdit: true, canDelete: false, canExport: true },
-      remisiones: { canView: true, canEdit: true, canDelete: false, canExport: true },
-      'metodos-pago': { canView: true, canEdit: true, canDelete: false, canExport: true },
-      'cuadre-caja': { canView: true, canEdit: true, canDelete: false, canExport: true },
-      'balance-general': { canView: true, canEdit: false, canDelete: false, canExport: true },
-      'gastos-operativos': { canView: true, canEdit: true, canDelete: true, canExport: true },
-      usuarios: { canView: true, canEdit: true, canDelete: false, canExport: true }
-    }
-  },
-  boveda: {
-    id: 'boveda',
-    name: 'Jefe de Bóveda & Joyería',
-    badge: '💎 Jefe de Bóveda',
-    color: '#fbbf24',
-    description: 'Custodia de metales, ingreso de prendas, pesaje de balanza y entrega a talleres',
-    isProtected: false,
-    permissions: {
-      dashboard: { canView: true, canEdit: false, canDelete: false, canExport: true },
-      puro: { canView: true, canEdit: true, canDelete: false, canExport: true },
-      inventario: { canView: true, canEdit: true, canDelete: false, canExport: true },
-      despacho: { canView: true, canEdit: true, canDelete: false, canExport: true },
-      joyerias: { canView: true, canEdit: false, canDelete: false, canExport: false },
-      'cartera-clientes': { canView: false, canEdit: false, canDelete: false, canExport: false },
-      proveedores: { canView: true, canEdit: true, canDelete: false, canExport: true },
-      cxc: { canView: false, canEdit: false, canDelete: false, canExport: false },
-      cxp: { canView: true, canEdit: true, canDelete: false, canExport: true },
-      remisiones: { canView: true, canEdit: false, canDelete: false, canExport: true },
-      'metodos-pago': { canView: false, canEdit: false, canDelete: false, canExport: false },
-      'cuadre-caja': { canView: false, canEdit: false, canDelete: false, canExport: false },
-      'balance-general': { canView: false, canEdit: false, canDelete: false, canExport: false },
-      'gastos-operativos': { canView: false, canEdit: false, canDelete: false, canExport: false },
-      usuarios: { canView: false, canEdit: false, canDelete: false, canExport: false }
-    }
-  },
-  comercial: {
-    id: 'comercial',
-    name: 'Asesor Comercial / Ventas',
-    badge: '💼 Comercial',
-    color: '#34d399',
-    description: 'Atención a joyerías, despacho en balanza, catálogo de piezas y remisiones',
-    isProtected: false,
-    permissions: {
-      dashboard: { canView: true, canEdit: false, canDelete: false, canExport: false },
-      puro: { canView: false, canEdit: false, canDelete: false, canExport: false },
-      inventario: { canView: true, canEdit: false, canDelete: false, canExport: false },
-      despacho: { canView: true, canEdit: true, canDelete: false, canExport: true },
-      joyerias: { canView: true, canEdit: true, canDelete: false, canExport: false },
-      'cartera-clientes': { canView: true, canEdit: false, canDelete: false, canExport: true },
-      proveedores: { canView: false, canEdit: false, canDelete: false, canExport: false },
-      cxc: { canView: true, canEdit: false, canDelete: false, canExport: false },
-      cxp: { canView: false, canEdit: false, canDelete: false, canExport: false },
-      remisiones: { canView: true, canEdit: false, canDelete: false, canExport: true },
-      'metodos-pago': { canView: false, canEdit: false, canDelete: false, canExport: false },
-      'cuadre-caja': { canView: false, canEdit: false, canDelete: false, canExport: false },
-      'balance-general': { canView: false, canEdit: false, canDelete: false, canExport: false },
-      'gastos-operativos': { canView: false, canEdit: false, canDelete: false, canExport: false },
-      usuarios: { canView: false, canEdit: false, canDelete: false, canExport: false }
-    }
-  },
-  cajero: {
-    id: 'cajero',
-    name: 'Caja & Facturación',
-    badge: '💵 Caja & Facturación',
-    color: '#06b6d4',
-    description: 'Cobros, abonos de joyerías, retal de oro, métodos de pago y arqueo de caja',
-    isProtected: false,
-    permissions: {
-      dashboard: { canView: true, canEdit: false, canDelete: false, canExport: false },
-      puro: { canView: false, canEdit: false, canDelete: false, canExport: false },
-      inventario: { canView: false, canEdit: false, canDelete: false, canExport: false },
-      despacho: { canView: false, canEdit: false, canDelete: false, canExport: false },
-      joyerias: { canView: true, canEdit: false, canDelete: false, canExport: false },
-      'cartera-clientes': { canView: true, canEdit: true, canDelete: false, canExport: true },
-      proveedores: { canView: false, canEdit: false, canDelete: false, canExport: false },
-      cxc: { canView: true, canEdit: true, canDelete: false, canExport: true },
-      cxp: { canView: false, canEdit: false, canDelete: false, canExport: false },
-      remisiones: { canView: true, canEdit: true, canDelete: false, canExport: true },
-      'metodos-pago': { canView: true, canEdit: true, canDelete: false, canExport: false },
-      'cuadre-caja': { canView: true, canEdit: true, canDelete: false, canExport: true },
-      'balance-general': { canView: false, canEdit: false, canDelete: false, canExport: false },
-      'gastos-operativos': { canView: true, canEdit: true, canDelete: false, canExport: true },
-      usuarios: { canView: false, canEdit: false, canDelete: false, canExport: false }
-    }
-  },
-  auditor: {
-    id: 'auditor',
-    name: 'Auditor Contable & Fiscal',
-    badge: '⚖️ Auditor NIIF',
-    color: '#a855f7',
-    description: 'Revisoría fiscal, balance general, auditoría de arqueos y gastos operativos (Solo Lectura)',
-    isProtected: false,
-    permissions: {
-      dashboard: { canView: true, canEdit: false, canDelete: false, canExport: true },
-      puro: { canView: true, canEdit: false, canDelete: false, canExport: true },
-      inventario: { canView: true, canEdit: false, canDelete: false, canExport: true },
-      despacho: { canView: false, canEdit: false, canDelete: false, canExport: false },
-      joyerias: { canView: true, canEdit: false, canDelete: false, canExport: true },
-      'cartera-clientes': { canView: true, canEdit: false, canDelete: false, canExport: true },
-      proveedores: { canView: true, canEdit: false, canDelete: false, canExport: true },
-      cxc: { canView: true, canEdit: false, canDelete: false, canExport: true },
-      cxp: { canView: true, canEdit: false, canDelete: false, canExport: true },
-      remisiones: { canView: true, canEdit: false, canDelete: false, canExport: true },
-      'metodos-pago': { canView: true, canEdit: false, canDelete: false, canExport: true },
-      'cuadre-caja': { canView: true, canEdit: false, canDelete: false, canExport: true },
-      'balance-general': { canView: true, canEdit: false, canDelete: false, canExport: true },
-      'gastos-operativos': { canView: true, canEdit: false, canDelete: false, canExport: true },
-      usuarios: { canView: false, canEdit: false, canDelete: false, canExport: false }
-    }
-  }
-};
-
-const activeSessions = new Map();
-
-function initAuth(db) {
-  let modified = false;
-
-  if (!db.roles || typeof db.roles !== 'object') {
-    db.roles = JSON.parse(JSON.stringify(DEFAULT_ROLES));
-    modified = true;
-  } else {
-    Object.keys(DEFAULT_ROLES).forEach(rKey => {
-      if (!db.roles[rKey]) {
-        db.roles[rKey] = JSON.parse(JSON.stringify(DEFAULT_ROLES[rKey]));
-        modified = true;
-      }
-    });
-  }
-
-  if (!Array.isArray(db.users)) {
-    db.users = [];
-    modified = true;
-  }
-
-  let superadmin = db.users.find(u => u.role === 'superadmin' || u.username === 'superadmin' || u.username === 'admin');
-  if (!superadmin) {
-    const { hash, salt } = hashPassword('nexus2026!');
-    superadmin = {
-      id: 'usr-superadmin',
-      name: 'Super Administrador (Dueño)',
-      username: 'superadmin',
-      email: 'admin@nexusjoyas.com',
-      role: 'superadmin',
-      passwordHash: hash,
-      salt: salt,
-      status: 'activo',
-      phone: '+57 300 000 0000',
-      createdAt: new Date().toISOString(),
-      lastLogin: null
-    };
-    db.users.unshift(superadmin);
-    modified = true;
-  }
-
-  if (modified) {
-    writeDB(db);
-  }
-}
-
 // 1. Login Endpoint
-app.post('/api/auth/login', (req, res) => {
-  const db = readDB();
-  initAuth(db);
+app.post('/api/auth/login', async (req, res) => {
+  const db = await getDB();
   const { username, password } = req.body;
 
   if (!username || !password) {
@@ -2331,12 +2499,11 @@ app.post('/api/auth/login', (req, res) => {
     return res.status(401).json({ success: false, message: 'Contraseña incorrecta. Verifica tus credenciales.' });
   }
 
-  // Generate secure token
-  const token = 'tok_' + Date.now() + '_' + crypto.randomBytes(24).toString('hex');
   const roleData = (db.roles && db.roles[user.role]) || DEFAULT_ROLES[user.role] || DEFAULT_ROLES.comercial;
+  const token = createAuthToken(user, roleData);
 
   user.lastLogin = new Date().toISOString();
-  writeDB(db);
+  await writeDB(db);
 
   const sessionData = {
     token,
@@ -2348,9 +2515,8 @@ app.post('/api/auth/login', (req, res) => {
     roleData,
     permissions: roleData.permissions || {},
     createdAt: Date.now(),
-    expiresAt: Date.now() + (24 * 60 * 60 * 1000) // 24 hours
+    expiresAt: Date.now() + (30 * 24 * 60 * 60 * 1000)
   };
-
   activeSessions.set(token, sessionData);
 
   res.json({
@@ -2376,25 +2542,19 @@ app.post('/api/auth/login', (req, res) => {
 });
 
 // 2. Validate current session / user profile
-app.get('/api/auth/me', (req, res) => {
-  const db = readDB();
-  initAuth(db);
+app.get('/api/auth/me', async (req, res) => {
+  const db = await getDB();
   const authHeader = req.headers.authorization || req.headers['x-auth-token'] || req.query.token;
   const token = authHeader ? authHeader.replace(/^Bearer\s+/i, '').trim() : null;
 
-  if (!token || !activeSessions.has(token)) {
+  const payload = verifyAuthToken(token);
+  if (!payload) {
     return res.status(401).json({ success: false, message: 'Sesión no iniciada o token expirado.' });
   }
 
-  const session = activeSessions.get(token);
-  if (Date.now() > session.expiresAt) {
-    activeSessions.delete(token);
-    return res.status(401).json({ success: false, message: 'La sesión ha expirado. Por favor ingresa nuevamente.' });
-  }
-
-  const user = db.users.find(u => u.id === session.userId);
+  const user = db.users.find(u => u.id === payload.userId || (payload.username && u.username === payload.username));
   if (!user || user.status !== 'activo') {
-    activeSessions.delete(token);
+    if (token) activeSessions.delete(token);
     return res.status(403).json({ success: false, message: 'Usuario no disponible o inactivo.' });
   }
 
@@ -2433,7 +2593,6 @@ app.post('/api/auth/logout', (req, res) => {
 // 4. Users CRUD
 app.get('/api/users', (req, res) => {
   const db = readDB();
-  initAuth(db);
   const users = (db.users || []).map(u => ({
     id: u.id,
     name: u.name,
@@ -2448,9 +2607,8 @@ app.get('/api/users', (req, res) => {
   res.json({ success: true, users, roles: db.roles || DEFAULT_ROLES });
 });
 
-app.post('/api/users', (req, res) => {
-  const db = readDB();
-  initAuth(db);
+app.post('/api/users', async (req, res) => {
+  const db = await getDB();
   const { name, username, email, role, password, phone, status } = req.body;
 
   if (!name || !name.trim()) {
@@ -2488,7 +2646,7 @@ app.post('/api/users', (req, res) => {
   };
 
   db.users.push(newUser);
-  writeDB(db);
+  await writeDB(db);
 
   res.status(201).json({
     success: true,
@@ -2506,9 +2664,8 @@ app.post('/api/users', (req, res) => {
   });
 });
 
-app.put('/api/users/:id', (req, res) => {
-  const db = readDB();
-  initAuth(db);
+app.put('/api/users/:id', async (req, res) => {
+  const db = await getDB();
   const { id } = req.params;
   const idx = db.users.findIndex(u => u.id === id);
 
@@ -2542,7 +2699,6 @@ app.put('/api/users/:id', (req, res) => {
   }
   if (req.body.role && db.roles && db.roles[req.body.role] && current.role !== 'superadmin') {
     current.role = req.body.role;
-    // Update active session role if logged in
     for (const [t, s] of activeSessions.entries()) {
       if (s.userId === current.id) {
         s.role = req.body.role;
@@ -2559,7 +2715,7 @@ app.put('/api/users/:id', (req, res) => {
     current.salt = salt;
   }
 
-  writeDB(db);
+  await writeDB(db);
 
   res.json({
     success: true,
@@ -2576,9 +2732,8 @@ app.put('/api/users/:id', (req, res) => {
   });
 });
 
-app.delete('/api/users/:id', (req, res) => {
-  const db = readDB();
-  initAuth(db);
+app.delete('/api/users/:id', async (req, res) => {
+  const db = await getDB();
   const { id } = req.params;
   const user = db.users.find(u => u.id === id);
 
@@ -2594,7 +2749,7 @@ app.delete('/api/users/:id', (req, res) => {
   for (const [t, s] of activeSessions.entries()) {
     if (s.userId === id) activeSessions.delete(t);
   }
-  writeDB(db);
+  await writeDB(db);
 
   res.json({ success: true, message: `Usuario "${user.name}" eliminado correctamente.` });
 });
@@ -2602,7 +2757,6 @@ app.delete('/api/users/:id', (req, res) => {
 // 5. Roles & Permissions Matrix
 app.get('/api/roles', (req, res) => {
   const db = readDB();
-  initAuth(db);
   res.json({
     success: true,
     roles: db.roles || DEFAULT_ROLES,
@@ -2626,9 +2780,8 @@ app.get('/api/roles', (req, res) => {
   });
 });
 
-app.put('/api/roles', (req, res) => {
-  const db = readDB();
-  initAuth(db);
+app.put('/api/roles', async (req, res) => {
+  const db = await getDB();
   const { roles } = req.body;
 
   if (!roles || typeof roles !== 'object') {
@@ -2648,9 +2801,8 @@ app.put('/api/roles', (req, res) => {
     }
   });
 
-  writeDB(db);
+  await writeDB(db);
 
-  // Synchronize active sessions with updated permissions immediately
   for (const [token, sess] of activeSessions.entries()) {
     if (db.roles[sess.role]) {
       sess.roleData = db.roles[sess.role];

@@ -26,16 +26,21 @@ if (isVercel) {
   }
 }
 
+const DEFAULT_MONGO_URI = 'mongodb+srv://nexuspormayor_db_user:KZ1IjSXIVR2RlTjC@cluster0.0jh50eq.mongodb.net/nexus_por_mayor?retryWrites=true&w=majority';
+
 async function connectDB() {
-  const uri = process.env.MONGODB_URI;
+  const uri = process.env.MONGODB_URI || DEFAULT_MONGO_URI;
 
   if (!uri || uri.trim() === '') {
-    console.log('ℹ️  [DB] No se detectó MONGODB_URI en .env. Operando con almacenamiento local: data/database.json');
+    console.log('ℹ️  [DB] No se detectó MONGODB_URI. Operando con almacenamiento local: data/database.json');
     isConnected = false;
     return false;
   }
 
   try {
+    if (isConnected && mongoose.connection.readyState === 1) {
+      return true;
+    }
     console.log('🔄 [DB] Conectando a MongoDB Atlas...');
     await mongoose.connect(uri, {
       serverSelectionTimeoutMS: 8000
@@ -126,61 +131,14 @@ async function autoSeedOrHydrate() {
       console.log('✅ [DB] ¡Datos iniciales sincronizados exitosamente en MongoDB Atlas!');
     } else {
       console.log('📥 [DB] MongoDB Atlas activo con datos existentes. Hidratando cache local...');
-      const [
-        rates,
-        items,
-        clients,
-        suppliers,
-        orders,
-        payments,
-        categories,
-        paymentMethods,
-        cashMovements,
-        puro24k,
-        users,
-        roles
-      ] = await Promise.all([
-        models.Rates.findOne().lean(),
-        models.Item.find().lean(),
-        models.Client.find().lean(),
-        models.Supplier.find().lean(),
-        models.Order.find().lean(),
-        models.Payment.find().lean(),
-        models.Category.find().lean(),
-        models.PaymentMethod.find().lean(),
-        models.CashMovement.find().lean(),
-        models.Puro24k.findOne().lean(),
-        models.User.find().lean(),
-        models.Role.find().lean()
-      ]);
-
-      const rolesMap = {};
-      if (Array.isArray(roles)) {
-        roles.forEach(r => {
-          if (r.id) rolesMap[r.id] = cleanDoc(r);
-        });
-      }
-
-      const atlasState = {
-        rates: rates ? cleanDoc(rates) : {},
-        items: (items || []).map(cleanDoc),
-        clients: (clients || []).map(cleanDoc),
-        suppliers: (suppliers || []).map(cleanDoc),
-        orders: (orders || []).map(cleanDoc),
-        payments: (payments || []).map(cleanDoc),
-        categories: (categories || []).map(cleanDoc),
-        paymentMethods: (paymentMethods || []).map(cleanDoc),
-        cashMovements: (cashMovements || []).map(cleanDoc),
-        puro24k: puro24k ? cleanDoc(puro24k) : { stockGrams: 0, purchases: [], deliveries: [] },
-        users: (users || []).map(cleanDoc),
-        roles: Object.keys(rolesMap).length ? rolesMap : undefined
-      };
-
-      try {
-        fs.writeFileSync(DB_PATH, JSON.stringify(atlasState, null, 2), 'utf-8');
-        console.log('✅ [DB] Cache local sincronizada con MongoDB Atlas.');
-      } catch (e) {
-        console.warn('⚠️ [DB] Warning escribiendo cache local:', e.message);
+      const atlasState = await fetchStateFromMongo();
+      if (atlasState) {
+        try {
+          fs.writeFileSync(DB_PATH, JSON.stringify(atlasState, null, 2), 'utf-8');
+          console.log('✅ [DB] Cache local sincronizada con MongoDB Atlas.');
+        } catch (e) {
+          console.warn('⚠️ [DB] Warning escribiendo cache local:', e.message);
+        }
       }
     }
   } catch (err) {
@@ -188,9 +146,58 @@ async function autoSeedOrHydrate() {
   }
 }
 
+async function fetchStateFromMongo() {
+  if (!isMongoConnected()) return null;
+  try {
+    const [
+      rates, items, clients, suppliers, orders, payments,
+      categories, paymentMethods, cashMovements, puro24k, users, roles
+    ] = await Promise.all([
+      models.Rates.findOne().lean(),
+      models.Item.find().lean(),
+      models.Client.find().lean(),
+      models.Supplier.find().lean(),
+      models.Order.find().lean(),
+      models.Payment.find().lean(),
+      models.Category.find().lean(),
+      models.PaymentMethod.find().lean(),
+      models.CashMovement.find().lean(),
+      models.Puro24k.findOne().lean(),
+      models.User.find().lean(),
+      models.Role.find().lean()
+    ]);
+
+    const rolesMap = {};
+    if (Array.isArray(roles)) {
+      roles.forEach(r => {
+        if (r.id) rolesMap[r.id] = cleanDoc(r);
+      });
+    }
+
+    return {
+      rates: rates ? cleanDoc(rates) : {},
+      items: (items || []).map(cleanDoc),
+      clients: (clients || []).map(cleanDoc),
+      suppliers: (suppliers || []).map(cleanDoc),
+      orders: (orders || []).map(cleanDoc),
+      payments: (payments || []).map(cleanDoc),
+      categories: (categories || []).map(cleanDoc),
+      paymentMethods: (paymentMethods || []).map(cleanDoc),
+      cashMovements: (cashMovements || []).map(cleanDoc),
+      puro24k: puro24k ? cleanDoc(puro24k) : { stockGrams: 0, purchases: [], deliveries: [] },
+      users: (users || []).map(cleanDoc),
+      roles: Object.keys(rolesMap).length ? rolesMap : undefined
+    };
+  } catch (err) {
+    console.warn('[DB] fetchStateFromMongo error:', err.message);
+    return null;
+  }
+}
+
 module.exports = {
   connectDB,
   isMongoConnected,
+  fetchStateFromMongo,
   models
 };
 

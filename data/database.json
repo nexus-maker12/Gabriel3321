@@ -10,10 +10,31 @@
     "override_promedioItaliano": 0,
     "last_updated": "2026-10-21T02:46:03.498Z",
     "createdAt": "2026-10-21T02:45:16.467Z",
-    "updatedAt": "2026-10-21T02:45:16.467Z"
+    "updatedAt": "2026-10-21T16:30:14.136Z"
   },
   "items": [],
-  "clients": [],
+  "clients": [
+    {
+      "id": "cli-1792598609969-69lyy",
+      "name": "Dueño Test",
+      "tradeName": "Joyería Test 1",
+      "documentType": "NIT",
+      "documentNumber": "",
+      "phone": "3001234567",
+      "email": "",
+      "city": "Medellin",
+      "address": "",
+      "creditLimitPesos": 50000000,
+      "currentDebtPesos": 0,
+      "currentDebtGrams": 0,
+      "creditDays": 15,
+      "riskLevel": "A - Excelente",
+      "lastPaymentDate": "2026-10-21",
+      "notes": "",
+      "createdAt": "2026-10-21T16:03:29.971Z",
+      "updatedAt": "2026-10-21T16:03:29.971Z"
+    }
+  ],
   "suppliers": [],
   "orders": [],
   "payments": [],
@@ -25,7 +46,7 @@
     "purchases": [],
     "deliveries": [],
     "createdAt": "2026-10-21T02:45:16.293Z",
-    "updatedAt": "2026-10-21T02:45:16.293Z"
+    "updatedAt": "2026-10-21T16:30:14.137Z"
   },
   "users": [
     {
