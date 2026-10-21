@@ -935,8 +935,10 @@ const App = {
         if (selItem) {
           const costHint = document.getElementById('despacho-cost-hint');
           const saleInput = document.getElementById('despacho-sale-price-input');
+          const weightInput = document.getElementById('despacho-weight-input');
           if (costHint) costHint.innerText = `Costo base: $${selItem.costPerGram.toLocaleString('es-CO')} /g`;
           if (saleInput) saleInput.value = Math.round(selItem.costPerGram * 1.15); // Suggested default
+          if (weightInput) weightInput.value = selItem.weightGrams || '';
         }
       };
     }
