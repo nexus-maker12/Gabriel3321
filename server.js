@@ -129,7 +129,7 @@ function calculateAverages(db) {
   const items = db.items || [];
   const puroPurchases = (db.puro24k && db.puro24k.purchases) || [];
 
-  // 1. Promedio Costo Puro 24K (Ponderado de compras)
+  // 1. Promedio Costo Puro 24K (Ponderado de compras o fijado manualmente)
   let totalPuroGrams = 0;
   let totalPuroCost = 0;
   puroPurchases.forEach(p => {
@@ -138,9 +138,11 @@ function calculateAverages(db) {
     totalPuroGrams += g;
     totalPuroCost += (g * c);
   });
-  const promedioPuro24k = (db.rates && db.rates.override_promedioPuro24k)
+  const promedioPuro24k = (db.rates && db.rates.override_promedioPuro24k !== undefined && db.rates.override_promedioPuro24k !== null)
     ? Number(db.rates.override_promedioPuro24k)
-    : (totalPuroGrams > 0 ? Math.round(totalPuroCost / totalPuroGrams) : ((db.rates && db.rates.oro24k_fino_benchmark) || 405000));
+    : (totalPuroGrams > 0
+        ? Math.round(totalPuroCost / totalPuroGrams)
+        : Number(db.rates?.oro24k_fino_benchmark ?? 0));
 
   // 2. Promedio Nacional 18K (Ponderado en bóveda o fijado manualmente)
   const nationalItems = items.filter(i => i.category === 'nacional');
@@ -152,9 +154,11 @@ function calculateAverages(db) {
     totalNatGrams += g;
     totalNatCost += (g * c);
   });
-  const promedioNacional = (db.rates && db.rates.override_promedioNacional)
+  const promedioNacional = (db.rates && db.rates.override_promedioNacional !== undefined && db.rates.override_promedioNacional !== null)
     ? Number(db.rates.override_promedioNacional)
-    : (totalNatGrams > 0 ? Math.round(totalNatCost / totalNatGrams) : 260000);
+    : (totalNatGrams > 0
+        ? Math.round(totalNatCost / totalNatGrams)
+        : Number(db.rates?.oro18k_nacional_base ?? 0));
 
   // 3. Promedio Italiano 18K (Ponderado en bóveda o fijado manualmente)
   const italianItems = items.filter(i => i.category === 'italiano');
@@ -166,9 +170,11 @@ function calculateAverages(db) {
     totalItGrams += g;
     totalItCost += (g * c);
   });
-  const promedioItaliano = (db.rates && db.rates.override_promedioItaliano)
+  const promedioItaliano = (db.rates && db.rates.override_promedioItaliano !== undefined && db.rates.override_promedioItaliano !== null)
     ? Number(db.rates.override_promedioItaliano)
-    : (totalItGrams > 0 ? Math.round(totalItCost / totalItGrams) : 282000);
+    : (totalItGrams > 0
+        ? Math.round(totalItCost / totalItGrams)
+        : Number(db.rates?.oro18k_italiano_base ?? 0));
 
   // 4. Total Vault 18k Grams (All categories in vault: nacional, italiano, turco, etc.)
   let totalVaultGrams = 0;
@@ -283,15 +289,24 @@ app.post('/api/rates', (req, res) => {
   } else {
     if (promedioPuro24k !== undefined && promedioPuro24k !== '') {
       const val = Number(promedioPuro24k);
-      if (!isNaN(val) && val >= 0) db.rates.override_promedioPuro24k = val;
+      if (!isNaN(val) && val >= 0) {
+        db.rates.override_promedioPuro24k = val;
+        db.rates.oro24k_fino_benchmark = val;
+      }
     }
     if (promedioNacional !== undefined && promedioNacional !== '') {
       const val = Number(promedioNacional);
-      if (!isNaN(val) && val >= 0) db.rates.override_promedioNacional = val;
+      if (!isNaN(val) && val >= 0) {
+        db.rates.override_promedioNacional = val;
+        db.rates.oro18k_nacional_base = val;
+      }
     }
     if (promedioItaliano !== undefined && promedioItaliano !== '') {
       const val = Number(promedioItaliano);
-      if (!isNaN(val) && val >= 0) db.rates.override_promedioItaliano = val;
+      if (!isNaN(val) && val >= 0) {
+        db.rates.override_promedioItaliano = val;
+        db.rates.oro18k_italiano_base = val;
+      }
     }
   }
 
@@ -946,8 +961,8 @@ app.post('/api/orders', (req, res) => {
   if (creditPesos > 0) {
     client.currentDebtPesos = (Number(client.currentDebtPesos) || 0) + creditPesos;
     const averages = calculateAverages(db);
-    const refRate = averages.promedioNacional || 260000;
-    client.currentDebtGrams = Number((client.currentDebtPesos / refRate).toFixed(2));
+    const refRate = Number(averages.promedioNacional ?? 0);
+    client.currentDebtGrams = refRate > 0 ? Number((client.currentDebtPesos / refRate).toFixed(2)) : 0;
   }
 
   // Scrap gold / retal payment transaction
@@ -1014,8 +1029,8 @@ app.post('/api/payments', (req, res) => {
 
     client.currentDebtPesos = Math.max(0, (Number(client.currentDebtPesos) || 0) - totalDeduction);
     const averages = calculateAverages(db);
-    const refRate = averages.promedioNacional || 260000;
-    client.currentDebtGrams = Number((client.currentDebtPesos / refRate).toFixed(2));
+    const refRate = Number(averages.promedioNacional ?? 0);
+    client.currentDebtGrams = refRate > 0 ? Number((client.currentDebtPesos / refRate).toFixed(2)) : 0;
     client.lastPaymentDate = now.split('T')[0];
   } else if (type === 'pago_cxp') {
     const supplier = db.suppliers.find(s => s.id === entityId);
@@ -1028,8 +1043,8 @@ app.post('/api/payments', (req, res) => {
       supplier.balanceManoDeObra = Math.max(0, supplier.balanceManoDeObra - totalDeduction);
     }
     const averages = calculateAverages(db);
-    const refRate = averages.promedioItaliano || 282000;
-    supplier.balanceDueGrams = Number((supplier.balanceDuePesos / refRate).toFixed(2));
+    const refRate = Number(averages.promedioItaliano ?? 0);
+    supplier.balanceDueGrams = refRate > 0 ? Number((supplier.balanceDuePesos / refRate).toFixed(2)) : 0;
   } else {
     return res.status(400).json({ success: false, message: 'Tipo de pago no soportado' });
   }
@@ -1661,7 +1676,8 @@ app.get('/api/gastos-operativos', (req, res) => {
   const db = readDB();
   const allMovements = db.cashMovements || [];
   const rates = db.rates || {};
-  const puroBenchmark = Number(rates.oro24k_fino_benchmark) || 405000;
+  const averages = calculateAverages(db);
+  const puroBenchmark = Number(averages.promedioPuro24k ?? rates.oro24k_fino_benchmark ?? 0);
 
   // Filter only operating expenses (type: egreso)
   let expenses = allMovements.filter(m => m.type === 'egreso');
@@ -1723,7 +1739,7 @@ app.get('/api/gastos-operativos', (req, res) => {
 
   // Compute Metrics
   const totalExpenses = expenses.reduce((acc, m) => acc + (Number(m.amount) || 0), 0);
-  const totalGrams24kEquivalent = Number((totalExpenses / puroBenchmark).toFixed(2));
+  const totalGrams24kEquivalent = puroBenchmark > 0 ? Number((totalExpenses / puroBenchmark).toFixed(2)) : 0;
 
   // Category Breakdown
   const catMap = {};
@@ -1892,9 +1908,9 @@ app.get('/api/balance-general', (req, res) => {
   const db = readDB();
   const averages = calculateAverages(db);
   const rates = db.rates || {};
-  const puroBenchmark = Number(rates.oro24k_fino_benchmark) || 405000;
-  const retalRate = Number(rates.retal_oro18k_compra) || 255000;
-  const plataRate = Number(rates.plata925_venta) || 6800;
+  const puroBenchmark = Number(averages.promedioPuro24k ?? rates.oro24k_fino_benchmark ?? 0);
+  const retalRate = Number(rates.retal_oro18k_compra ?? 0);
+  const plataRate = Number(rates.plata925_venta ?? 0);
 
   // 1. Activos Disponibles (Caja & Bancos)
   const allLedger = compileCashLedger(db);
@@ -1953,7 +1969,7 @@ app.get('/api/balance-general', (req, res) => {
 
   // Oro Puro 24K en Bóveda
   const puroGramsVault = Number((db.puro24k && db.puro24k.stockGrams) || 0);
-  const puroCostAvg = averages.promedioPuro24k || puroBenchmark;
+  const puroCostAvg = Number(averages.promedioPuro24k ?? puroBenchmark ?? 0);
   const puroValuationVault = Math.round(puroGramsVault * puroCostAvg);
 
   // Oro Puro 24K en Talleres de Maquila (Activo Propio en Custodia / Transformación)
@@ -1979,7 +1995,7 @@ app.get('/api/balance-general', (req, res) => {
 
   // TOTAL ACTIVOS
   const totalAssets = totalCashAndBanks + totalReceivablesPesos + inventorySummary.totalInventoryValue;
-  const totalAssetsPuroGramsEq = Number((totalAssets / puroBenchmark).toFixed(2));
+  const totalAssetsPuroGramsEq = puroBenchmark > 0 ? Number((totalAssets / puroBenchmark).toFixed(2)) : 0;
 
   // 4. PASIVOS (Cuentas por Pagar Proveedores & Manos de Obra Talleres)
   const totalPayablesPesos = suppliers.reduce((acc, s) => acc + (Number(s.balanceDuePesos) || 0), 0);
@@ -1998,7 +2014,7 @@ app.get('/api/balance-general', (req, res) => {
 
   // 5. PATRIMONIO NETO / CAPITAL CONTABLE (Activo - Pasivo)
   const netWorth = totalAssets - totalLiabilities;
-  const netWorthPuroGramsEq = Number((netWorth / puroBenchmark).toFixed(2));
+  const netWorthPuroGramsEq = puroBenchmark > 0 ? Number((netWorth / puroBenchmark).toFixed(2)) : 0;
   const workingCapital = (totalCashAndBanks + totalReceivablesPesos + inventorySummary.totalInventoryValue) - totalLiabilities;
 
   // Utilidad Neta Acumulada por Despachos

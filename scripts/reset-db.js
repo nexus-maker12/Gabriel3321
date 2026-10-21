@@ -46,14 +46,14 @@ async function resetDB() {
   // Clean Zero State
   const cleanState = {
     rates: {
-      oro24k_fino_benchmark: 405000,
-      oro18k_nacional_base: 260000,
-      oro18k_italiano_base: 282000,
-      retal_oro18k_compra: 255000,
-      plata925_venta: 6800,
-      override_promedioPuro24k: null,
-      override_promedioNacional: null,
-      override_promedioItaliano: null,
+      oro24k_fino_benchmark: 0,
+      oro18k_nacional_base: 0,
+      oro18k_italiano_base: 0,
+      retal_oro18k_compra: 0,
+      plata925_venta: 0,
+      override_promedioPuro24k: 0,
+      override_promedioNacional: 0,
+      override_promedioItaliano: 0,
       last_updated: new Date().toISOString()
     },
     puro24k: {

@@ -353,10 +353,10 @@ const App = {
     const ncElem = document.getElementById('ticker-nc-avg');
     const retalElem = document.getElementById('ticker-retal');
 
-    const avgPuro = this.averages.promedioPuro24k || 404810;
-    const avgIt = this.averages.promedioItaliano || 283811;
-    const avgNc = this.averages.promedioNacional || 259514;
-    const retal = this.rates.retal_oro18k_compra || 255000;
+    const avgPuro = Number(this.averages?.promedioPuro24k ?? this.rates?.override_promedioPuro24k ?? this.rates?.oro24k_fino_benchmark ?? 0);
+    const avgIt = Number(this.averages?.promedioItaliano ?? this.rates?.override_promedioItaliano ?? this.rates?.oro18k_italiano_base ?? 0);
+    const avgNc = Number(this.averages?.promedioNacional ?? this.rates?.override_promedioNacional ?? this.rates?.oro18k_nacional_base ?? 0);
+    const retal = Number(this.rates?.retal_oro18k_compra ?? 0);
 
     if (puroElem) puroElem.innerText = `$${avgPuro.toLocaleString('es-CO')}/g`;
     if (itElem) itElem.innerText = `$${avgIt.toLocaleString('es-CO')}/g`;
@@ -443,12 +443,15 @@ const App = {
     if (elNcGrams) elNcGrams.innerText = `${(v.nationalGrams || 0).toFixed(2)} g`;
 
     if (elPuroStock) elPuroStock.innerText = `${(puro.stockGrams || 0).toFixed(2)} g`;
-    if (elPuroCost) elPuroCost.innerText = `Costo Promedio: $${(this.averages.promedioPuro24k || 404810).toLocaleString('es-CO')}/g`;
+    const avgPuroVal = Number(this.averages?.promedioPuro24k ?? 0);
+    if (elPuroCost) elPuroCost.innerText = `Costo Promedio: $${avgPuroVal.toLocaleString('es-CO')}/g`;
     if (elPuroTalleres) elPuroTalleres.innerText = `En talleres: ${(puro.inTalleresGrams || 0).toFixed(2)} g`;
 
     if (elVaultVal) elVaultVal.innerText = `$${(v.totalCost || 0).toLocaleString('es-CO')}`;
-    if (elAvgNc) elAvgNc.innerText = `$${(this.averages.promedioNacional || 259514).toLocaleString('es-CO')}/g`;
-    if (elAvgIt) elAvgIt.innerText = `$${(this.averages.promedioItaliano || 283811).toLocaleString('es-CO')}/g`;
+    const avgNcVal = Number(this.averages?.promedioNacional ?? 0);
+    const avgItVal = Number(this.averages?.promedioItaliano ?? 0);
+    if (elAvgNc) elAvgNc.innerText = `$${avgNcVal.toLocaleString('es-CO')}/g`;
+    if (elAvgIt) elAvgIt.innerText = `$${avgItVal.toLocaleString('es-CO')}/g`;
 
     if (elCxcPesos) elCxcPesos.innerText = `$${(cxc.totalPesos || 0).toLocaleString('es-CO')}`;
     if (elCxcGrams) elCxcGrams.innerText = `Eq: ${(cxc.totalGrams || 0).toFixed(2)} g oro 18K`;
@@ -464,7 +467,7 @@ const App = {
     const clients = this.clients || [];
     const payments = this.payments || [];
     const averages = this.averages || {};
-    const refRate = averages.promedioNacional || 260000;
+    const refRate = Number(averages.promedioNacional ?? 0);
 
     const totalDebtPesos = clients.reduce((acc, c) => acc + (Number(c.currentDebtPesos) || 0), 0);
     const totalDebtGrams = clients.reduce((acc, c) => acc + (Number(c.currentDebtGrams) || 0), 0);
@@ -622,7 +625,7 @@ const App = {
     const inTalleresElem = document.getElementById('puro-talleres-stock');
 
     const stock = Number(this.puroData.stockGrams || 0);
-    const avg = Number(this.averages.promedioPuro24k || 404810);
+    const avg = Number(this.averages?.promedioPuro24k ?? this.rates?.override_promedioPuro24k ?? this.rates?.oro24k_fino_benchmark ?? 0);
     const inTalleres = (this.suppliers || []).reduce((acc, s) => acc + (Number(s.puroInHandsGrams) || 0), 0);
 
     if (stockElem) stockElem.innerText = `${stock.toFixed(2)} g`;
@@ -806,8 +809,8 @@ const App = {
       return;
     }
 
-    const avgIt = this.averages.promedioItaliano || 283811;
-    const avgNc = this.averages.promedioNacional || 259514;
+    const avgIt = Number(this.averages?.promedioItaliano ?? 0);
+    const avgNc = Number(this.averages?.promedioNacional ?? 0);
 
     container.innerHTML = filtered.map(item => {
       const catInfo = this.getCategoryBadge(item.category);
@@ -2948,7 +2951,7 @@ const App = {
         this.suppliers.map(s => `<option value="${s.id}">${s.name} (${s.category})</option>`).join('');
     }
     document.getElementById('compra-puro-grams').value = '';
-    document.getElementById('compra-puro-cost').value = this.averages.promedioPuro24k || 404810;
+    document.getElementById('compra-puro-cost').value = Number(this.averages?.promedioPuro24k ?? 0);
     this.openModal('modal-compra-puro');
   },
 
@@ -2994,8 +2997,9 @@ const App = {
       supSelect.innerHTML = `<option value="">-- Seleccionar Taller / Proveedor --</option>` +
         this.suppliers.map(s => `<option value="${s.id}" ${s.id === supplierId ? 'selected' : ''}>${s.name} (Puro en poder: ${s.puroInHandsGrams || 0}g)</option>`).join('');
     }
+    const avgPuroVal = Number(this.averages?.promedioPuro24k ?? 0);
     document.getElementById('entrega-puro-stock-hint').innerText = 
-      `Oro Puro 24K disponible en bóveda: ${(this.puroData.stockGrams || 0).toFixed(2)} g (Promedio: $${(this.averages.promedioPuro24k || 404810).toLocaleString('es-CO')}/g)`;
+      `Oro Puro 24K disponible en bóveda: ${(this.puroData.stockGrams || 0).toFixed(2)} g (Promedio: $${avgPuroVal.toLocaleString('es-CO')}/g)`;
     document.getElementById('entrega-puro-grams').value = '';
     document.getElementById('entrega-puro-notes').value = '';
 
@@ -3224,8 +3228,8 @@ const App = {
         const costInput = document.getElementById('item-cost-input');
         if (costInput) {
           costInput.value = e.target.value === 'italiano' 
-            ? (this.averages.promedioItaliano || 283811) 
-            : (this.averages.promedioNacional || 259514);
+            ? Number(this.averages?.promedioItaliano ?? 0) 
+            : Number(this.averages?.promedioNacional ?? 0);
         }
       };
       catSelect.dispatchEvent(new Event('change'));
@@ -3849,10 +3853,10 @@ const App = {
   },
 
   openEditRatesModal(focusTarget = 'puro') {
-    const avgPuro = this.averages.promedioPuro24k || 404810;
-    const avgNc = this.averages.promedioNacional || 259514;
-    const avgIt = this.averages.promedioItaliano || 283811;
-    const retal = this.rates.retal_oro18k_compra || 255000;
+    const avgPuro = Number(this.averages?.promedioPuro24k ?? this.rates?.override_promedioPuro24k ?? this.rates?.oro24k_fino_benchmark ?? 0);
+    const avgNc = Number(this.averages?.promedioNacional ?? this.rates?.override_promedioNacional ?? this.rates?.oro18k_nacional_base ?? 0);
+    const avgIt = Number(this.averages?.promedioItaliano ?? this.rates?.override_promedioItaliano ?? this.rates?.oro18k_italiano_base ?? 0);
+    const retal = Number(this.rates?.retal_oro18k_compra ?? 0);
 
     const inputPuro = document.getElementById('rate-input-puro');
     const inputNc = document.getElementById('rate-input-nc');
@@ -3868,9 +3872,9 @@ const App = {
     const hintNc = document.getElementById('rate-hint-nc');
     const hintIt = document.getElementById('rate-hint-it');
 
-    if (hintPuro) hintPuro.innerText = this.rates.override_promedioPuro24k ? '(Fijado manual)' : '(Ponderado compras)';
-    if (hintNc) hintNc.innerText = this.rates.override_promedioNacional ? '(Fijado manual)' : '(Ponderado bóveda)';
-    if (hintIt) hintIt.innerText = this.rates.override_promedioItaliano ? '(Fijado manual)' : '(Ponderado bóveda)';
+    if (hintPuro) hintPuro.innerText = (this.rates?.override_promedioPuro24k !== undefined && this.rates?.override_promedioPuro24k !== null) ? '(Fijado manual)' : '(Ponderado compras)';
+    if (hintNc) hintNc.innerText = (this.rates?.override_promedioNacional !== undefined && this.rates?.override_promedioNacional !== null) ? '(Fijado manual)' : '(Ponderado bóveda)';
+    if (hintIt) hintIt.innerText = (this.rates?.override_promedioItaliano !== undefined && this.rates?.override_promedioItaliano !== null) ? '(Fijado manual)' : '(Ponderado bóveda)';
 
     this.openModal('modal-edit-rates');
 
@@ -3892,8 +3896,9 @@ const App = {
     const promedioItaliano = parseFloat(document.getElementById('rate-input-it')?.value);
     const retal_oro18k_compra = parseFloat(document.getElementById('rate-input-retal')?.value);
 
-    if (isNaN(promedioPuro24k) || isNaN(promedioNacional) || isNaN(promedioItaliano) || isNaN(retal_oro18k_compra)) {
-      alert('Por favor ingresa valores numéricos válidos mayores a cero para todas las tasas.');
+    if (isNaN(promedioPuro24k) || isNaN(promedioNacional) || isNaN(promedioItaliano) || isNaN(retal_oro18k_compra) ||
+        promedioPuro24k < 0 || promedioNacional < 0 || promedioItaliano < 0 || retal_oro18k_compra < 0) {
+      alert('Por favor ingresa valores numéricos válidos (0 o mayores) para todas las tasas.');
       return;
     }
 
@@ -5005,7 +5010,7 @@ const App = {
 
     // Benchmark gold pill
     const benchmarkPill = document.getElementById('gastos-benchmark-pill');
-    const benchmarkRate = this.averages.promedioPuro24k || 405000;
+    const benchmarkRate = Number(this.averages?.promedioPuro24k ?? this.rates?.override_promedioPuro24k ?? this.rates?.oro24k_fino_benchmark ?? 0);
     if (benchmarkPill) {
       benchmarkPill.innerText = `👑 Benchmark 24K: $${benchmarkRate.toLocaleString('es-CO')}/g`;
     }
@@ -5489,8 +5494,8 @@ const App = {
       ? dateObj.toLocaleDateString('es-CO', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })
       : exp.date;
 
-    const benchmark = this.averages.promedioPuro24k || 405000;
-    const grams24kEq = (exp.amount / benchmark).toFixed(2);
+    const benchmark = Number(this.averages?.promedioPuro24k ?? this.rates?.override_promedioPuro24k ?? this.rates?.oro24k_fino_benchmark ?? 0);
+    const grams24kEq = benchmark > 0 ? (exp.amount / benchmark).toFixed(2) : '0.00';
 
     printContainer.innerHTML = `
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #0f172a; padding: 24px; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 8px;">

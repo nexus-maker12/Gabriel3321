@@ -1,16 +1,16 @@
 {
   "rates": {
-    "oro24k_fino_benchmark": 405000,
-    "oro18k_nacional_base": 260000,
-    "oro18k_italiano_base": 282000,
-    "retal_oro18k_compra": 255000,
-    "plata925_venta": 6800,
-    "override_promedioPuro24k": null,
-    "override_promedioNacional": null,
-    "override_promedioItaliano": null,
-    "last_updated": "2026-10-21T02:21:54.480Z",
-    "createdAt": "2026-10-21T02:21:56.655Z",
-    "updatedAt": "2026-10-21T02:21:56.655Z"
+    "oro24k_fino_benchmark": 0,
+    "oro18k_nacional_base": 0,
+    "oro18k_italiano_base": 0,
+    "retal_oro18k_compra": 0,
+    "plata925_venta": 0,
+    "override_promedioPuro24k": 0,
+    "override_promedioNacional": 0,
+    "override_promedioItaliano": 0,
+    "last_updated": "2026-10-21T02:46:03.498Z",
+    "createdAt": "2026-10-21T02:45:16.467Z",
+    "updatedAt": "2026-10-21T02:45:16.467Z"
   },
   "items": [],
   "clients": [],
@@ -24,8 +24,8 @@
     "stockGrams": 0,
     "purchases": [],
     "deliveries": [],
-    "createdAt": "2026-10-21T02:21:56.403Z",
-    "updatedAt": "2026-10-21T02:21:56.403Z"
+    "createdAt": "2026-10-21T02:45:16.293Z",
+    "updatedAt": "2026-10-21T02:45:16.293Z"
   },
   "users": [
     {
