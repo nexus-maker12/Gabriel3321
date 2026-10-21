@@ -1,0 +1,3579 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nexus por Mayor - Plataforma Mayorista de Joyería por Gramo</title>
+  <meta name="description" content="Sistema de gestión mayorista de joyería netamente por gramo: Promedio de Puro 24K, Promedios Nacional e Italiano 18K, Manos de Obra, Entregas de Puro, Cartera y Despacho.">
+  <link rel="icon" type="image/jpeg" href="assets/logo.jpg">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+  <!-- Fullscreen Luxury Login Screen -->
+  <div id="login-screen" class="login-overlay">
+    <div class="login-container">
+      <div class="login-card">
+        <!-- Brand Header -->
+        <div class="login-brand">
+          <div class="login-logo-ring">
+            <img src="assets/logo.jpg" alt="Nexus por Mayor" class="login-logo-img">
+          </div>
+          <h1 class="login-title">NEXUS</h1>
+          <div class="login-subtitle">POR MAYOR • SISTEMA DE JOYERÍA & BÓVEDA</div>
+          <div class="login-badge-secure">
+            <span class="secure-icon">🛡️</span> Acceso Restringido & Autenticado
+          </div>
+        </div>
+
+        <!-- Alert messages -->
+        <div id="login-alert" class="login-alert" style="display: none;"></div>
+
+        <!-- Login Form -->
+        <form id="form-login" onsubmit="App.handleLoginSubmit(event)" autocomplete="on">
+          <div class="login-input-group">
+            <label class="login-label" for="login-username">Usuario o Correo Electrónico</label>
+            <div class="login-input-wrap">
+              <span class="login-input-icon">👤</span>
+              <input type="text" id="login-username" class="login-input" placeholder="ej. superadmin" required autocomplete="username">
+            </div>
+          </div>
+
+          <div class="login-input-group">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <label class="login-label" for="login-password" style="margin-bottom: 0;">Contraseña de Seguridad</label>
+              <button type="button" class="btn-text-gold" onclick="App.togglePasswordVisibility('login-password', 'login-pass-icon')" style="font-size: 0.72rem; background: none; border: none; cursor: pointer; color: var(--gold-primary);">
+                <span id="login-pass-icon">👁️</span> Mostrar
+              </button>
+            </div>
+            <div class="login-input-wrap">
+              <span class="login-input-icon">🔒</span>
+              <input type="password" id="login-password" class="login-input" placeholder="••••••••" required autocomplete="current-password">
+            </div>
+          </div>
+
+          <div style="display: flex; justify-content: space-between; align-items: center; margin: 14px 0 20px 0; font-size: 0.8rem; color: var(--text-dim);">
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+              <input type="checkbox" id="login-remember" checked style="accent-color: var(--gold-primary);">
+              <span>Recordar sesión</span>
+            </label>
+            <span style="color: var(--text-dim); font-size: 0.75rem;">SHA-512 PBKDF2</span>
+          </div>
+
+          <button type="submit" id="btn-login-submit" class="btn-login-gold">
+            <span id="login-btn-spinner" class="spinner-small" style="display: none;">⏳</span>
+            <span id="login-btn-text">🔐 Entrar a la Plataforma</span>
+          </button>
+        </form>
+
+        <div class="login-footer">
+          <span>Nexus Joyas • Bóveda Blindada & Control de Pesaje en Oro</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Top Sticky Gold Ticker with Real-time Weighted Cost Averages -->
+  <header class="gold-ticker-bar">
+    <div class="ticker-items">
+      <div class="ticker-item" onclick="App.openEditRatesModal('puro')" title="Clic para editar tasa de Puro 24K">
+        <span class="ticker-badge badge-bullion">👑 Puro 24K</span>
+        <span class="ticker-val" id="ticker-puro-avg">$404,810/g</span>
+        <span class="ticker-edit-icon">✏️</span>
+      </div>
+      <div class="ticker-item" onclick="App.openEditRatesModal('nacional')" title="Clic para editar tasa de Nacional 18K">
+        <span class="ticker-badge badge-nacional">🇨🇴 Nacional 18K</span>
+        <span class="ticker-val" id="ticker-nc-avg">$259,514/g</span>
+        <span class="ticker-edit-icon">✏️</span>
+      </div>
+      <div class="ticker-item" onclick="App.openEditRatesModal('italiano')" title="Clic para editar tasa de Italiano 18K">
+        <span class="ticker-badge badge-italian">🇮🇹 Italiano 18K</span>
+        <span class="ticker-val" id="ticker-it-avg">$283,811/g</span>
+        <span class="ticker-edit-icon">✏️</span>
+      </div>
+      <div class="ticker-item" onclick="App.openEditRatesModal('retal')" title="Clic para editar tasa de Retal 18K">
+        <span class="ticker-badge badge-retal">♻️ Retal 18K</span>
+        <span class="ticker-val" id="ticker-retal" style="color: #f87171;">$255,000/g</span>
+        <span class="ticker-edit-icon">✏️</span>
+      </div>
+    </div>
+
+    <div class="ticker-actions">
+      <!-- User Profile Badge & Logout -->
+      <div id="user-profile-badge" class="user-profile-badge" style="display: none;">
+        <div class="user-avatar-badge" id="header-user-avatar">SA</div>
+        <div class="user-info-badge">
+          <span class="user-name-badge" id="header-user-name">Super Admin</span>
+          <span class="user-role-tag" id="header-user-role">👑 Super Admin</span>
+        </div>
+        <button type="button" class="btn btn-outline-danger btn-xs" onclick="App.logout()" title="Cerrar Sesión Segura" style="padding: 4px 8px; border-radius: 6px; font-size: 0.75rem; margin-left: 4px; white-space: nowrap;">
+          🚪 Salir
+        </button>
+      </div>
+
+      <button id="btn-theme-toggle" class="btn btn-outline-gold btn-sm" onclick="App.toggleTheme()" title="Alternar entre Modo Claro y Oscuro" style="display: inline-flex; align-items: center; gap: 6px;">
+        <span id="theme-icon">☀️</span>
+        <span id="theme-text">Modo Claro</span>
+      </button>
+      <button class="btn btn-gold btn-sm" onclick="App.openNewJoyeriaModal()">
+        + Joyería
+      </button>
+      <button class="btn btn-outline-gold btn-sm" onclick="App.openNewProveedorModal()">
+        + Proveedor
+      </button>
+      <button class="btn btn-outline-gold btn-sm" onclick="App.openCompraPuroModal()">
+        + Comprar 24K
+      </button>
+    </div>
+  </header>
+
+  <div class="app-container">
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+      <div class="brand-wrapper">
+        <img src="assets/logo.jpg" alt="Nexus Logo" class="brand-logo-img">
+        <div class="brand-text">
+          <h1>NEXUS</h1>
+          <span class="brand-tag">POR MAYOR • GRAMAJE PURO</span>
+        </div>
+      </div>
+
+      <ul class="nav-menu">
+        <li class="nav-item active">
+          <button data-view="dashboard">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+            Bóveda & Dashboard
+          </button>
+        </li>
+        <li class="nav-item">
+          <button data-view="puro">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><path d="m4.93 4.93 4.24 4.24"/><path d="m14.83 9.17 4.24-4.24"/><path d="m14.83 14.83 4.24 4.24"/><path d="m9.17 14.83-4.24 4.24"/><circle cx="12" cy="12" r="4"/></svg>
+            Oro Puro 24K & Maquila
+          </button>
+        </li>
+        <li class="nav-item">
+          <button data-view="inventario">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+            Inventario por Gramo
+          </button>
+        </li>
+        <li class="nav-item">
+          <button data-view="despacho">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+            Despacho & Balanza
+          </button>
+        </li>
+        <li class="nav-item">
+          <button data-view="joyerias">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-3"/><path d="M9 9h1"/><path d="M9 13h1"/><path d="M9 17h1"/></svg>
+            Joyerías (Clientes)
+          </button>
+        </li>
+        <li class="nav-item">
+          <button data-view="cartera-clientes">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><line x1="8" y1="7" x2="16" y2="7"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+            Cartera de Clientes
+          </button>
+        </li>
+        <li class="nav-item">
+          <button data-view="proveedores">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M2 20a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8l-7 5V8l-7 5V4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/></svg>
+            Proveedores & Talleres
+          </button>
+        </li>
+        <li class="nav-item">
+          <button data-view="cxc">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            Cuentas por Cobrar (CxC)
+          </button>
+        </li>
+        <li class="nav-item">
+          <button data-view="cxp">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            Talleres & CxP (Manos de Obra)
+          </button>
+        </li>
+        <li class="nav-item">
+          <button data-view="remisiones">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            Historial Remisiones
+          </button>
+        </li>
+        <li class="nav-item">
+          <button data-view="metodos-pago">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect width="20" height="14" x="2" y="5" rx="2"/><line x1="2" x2="22" y1="10" y2="10"/><path d="M6 15h2"/><path d="M12 15h4"/></svg>
+            Métodos de Pago
+          </button>
+        </li>
+        <li class="nav-item">
+          <button data-view="cuadre-caja">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2v20"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            Cuadre de Caja
+          </button>
+        </li>
+        <li class="nav-item">
+          <button data-view="balance-general">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="M7 21h10"/><path d="M12 3v18"/><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/></svg>
+            Balance General
+          </button>
+        </li>
+        <li class="nav-item">
+          <button data-view="gastos-operativos">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M9 14h6"/><path d="M9 18h6"/><path d="M9 10h1"/></svg>
+            Gastos Operativos
+          </button>
+        </li>
+        <li class="nav-item" id="nav-item-usuarios">
+          <button data-view="usuarios" id="nav-btn-usuarios">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            Usuarios & Permisos
+          </button>
+        </li>
+      </ul>
+
+      <!-- Quick Vault Indicator in Sidebar -->
+      <div class="sidebar-vault-chip">
+        <div class="vault-chip-title">
+          <span>Oro 18K en Bóveda</span>
+          <span style="color: var(--gold-primary);">Ley 750</span>
+        </div>
+        <div class="vault-chip-val" id="sidebar-vault-grams">0.00 g</div>
+        <div class="vault-chip-sub">
+          <span id="sidebar-vault-it">IT: 0.0g</span>
+          <span id="sidebar-vault-nc">NC: 0.0g</span>
+        </div>
+        <div style="font-size: 0.72rem; color: #fbbf24; margin-top: 6px; font-weight: 700;" id="sidebar-vault-puro">
+          👑 24K: 0.0g
+        </div>
+      </div>
+
+      <!-- Quick Utility Strip (Theme & Sound) -->
+      <div class="sidebar-util-strip">
+        <button class="util-strip-btn" onclick="App.toggleTheme()" title="Alternar Modo Claro / Oscuro">
+          <span id="sidebar-theme-icon">☀️</span>
+          <span id="sidebar-theme-label">Claro</span>
+        </button>
+        <button class="util-strip-btn" id="btn-toggle-sound" onclick="App.toggleSound()" title="Alternar Sonido">
+          <span id="sidebar-sound-icon">🔊</span>
+          <span id="sidebar-sound-label">Audio</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Viewport -->
+    <main class="main-viewport">
+
+      <!-- ========================================================= -->
+      <!-- VIEW 1: DASHBOARD & BÓVEDA -->
+      <!-- ========================================================= -->
+      <section id="view-dashboard" class="view-section">
+        <div class="page-header">
+          <div class="page-title-group">
+            <h2>Bóveda Mayorista & Promedios Ponderados</h2>
+            <p class="page-subtitle">Costo promedio de Puro 24K, promedios en bóveda de Nacional e Italiano, y manos de obra con talleres.</p>
+          </div>
+          <div class="header-actions">
+            <button class="btn btn-gold" onclick="App.openNewJoyeriaModal()">
+              + Joyería
+            </button>
+            <button class="btn btn-outline-gold" onclick="App.openNewProveedorModal()">
+              + Proveedor
+            </button>
+            <button class="btn btn-outline-gold" onclick="App.openEntregaPuroModal()">
+              📤 Entregar Puro a Taller
+            </button>
+            <button class="btn btn-gold" onclick="App.switchView('despacho')">
+              ⚡ Nuevo Despacho por Balanza
+            </button>
+          </div>
+        </div>
+
+        <!-- Metric Cards -->
+        <div class="stats-grid">
+          <!-- Total Vault 18k Grams -->
+          <div class="stat-card accent-gold">
+            <div class="stat-card-header">
+              <span class="stat-label">Oro 18K en Bóveda</span>
+              <div class="stat-icon">⚖️</div>
+            </div>
+            <div class="stat-value" id="dash-total-grams">0.00 g</div>
+            <div class="stat-footer">
+              <span>🇮🇹 Italiano: <strong id="dash-it-grams" style="color: #34d399;">0.00 g</strong></span>
+              <span>🇨🇴 Nacional: <strong id="dash-nc-grams" style="color: #fbbf24;">0.00 g</strong></span>
+            </div>
+          </div>
+
+          <!-- Oro Puro 24K (Granalla/Fino) -->
+          <div class="stat-card accent-gold">
+            <div class="stat-card-header">
+              <span class="stat-label">Oro Puro 24K en Bóveda</span>
+              <div class="stat-icon">👑</div>
+            </div>
+            <div class="stat-value" id="dash-puro-stock" style="color: #fbe38e;">0.00 g</div>
+            <div class="stat-footer">
+              <span id="dash-puro-cost" style="color: var(--gold-light); font-weight: 700;">Costo Promedio: $0/g</span>
+              <span id="dash-puro-talleres" style="color: #fbbf24;">En talleres: 0.00 g</span>
+            </div>
+          </div>
+
+          <!-- Promedios Ponderados 18k -->
+          <div class="stat-card accent-gold">
+            <div class="stat-card-header">
+              <span class="stat-label">Costo Bóveda 18K</span>
+              <div class="stat-icon">💎</div>
+            </div>
+            <div class="stat-value" id="dash-vault-cost">$0</div>
+            <div class="stat-footer">
+              <span>🇨🇴 NC Prom: <strong id="dash-avg-nc" style="color: #fbbf24;">$0/g</strong></span>
+              <span>🇮🇹 IT Prom: <strong id="dash-avg-it" style="color: #34d399;">$0/g</strong></span>
+            </div>
+          </div>
+
+          <!-- Cuentas por Cobrar & Pagar -->
+          <div class="stat-card accent-emerald">
+            <div class="stat-card-header">
+              <span class="stat-label">Cartera CxC & Talleres</span>
+              <div class="stat-icon">📈</div>
+            </div>
+            <div class="stat-value" id="dash-cxc-pesos" style="color: #34d399;">$0</div>
+            <div class="stat-footer">
+              <span id="dash-cxc-grams">Eq: 0.00 g oro</span>
+              <span id="dash-cxp-mo" style="color: #f87171;">Mano de obra: $0</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Interactive Digital Scale (Balanza Digital Pro Virtual) -->
+        <div class="scale-widget-card">
+          <div class="scale-header">
+            <div class="scale-title">
+              <div class="scale-status-light"></div>
+              <h3>Balanza Digital Mayorista & Negociador en Caliente</h3>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <select id="scale-cat-select" class="form-control" style="width: auto; padding: 6px 12px; font-size: 0.82rem;">
+                <option value="nacional">🇨🇴 Oro 18K Nacional</option>
+                <option value="italiano">🇮🇹 Oro 18K Italiano (750)</option>
+                <option value="puro24k">👑 Oro Puro 24K (Granalla)</option>
+                <option value="retal">♻️ Retal 18K Compra</option>
+              </select>
+              <button class="btn btn-secondary btn-sm" id="btn-scale-tare">Tara</button>
+              <button class="btn btn-secondary btn-sm" id="btn-scale-zero">Zero</button>
+            </div>
+          </div>
+
+          <div class="scale-body-grid">
+            <!-- Left: LCD Display & Quick Weight buttons -->
+            <div>
+              <div class="lcd-screen-wrapper">
+                <div class="lcd-top-indicators">
+                  <span>MODO: JOYERÍA FINA POR GRAMO</span>
+                  <span>CAL: 0.01g PREC</span>
+                </div>
+                <div class="lcd-main-digits">
+                  <span id="scale-lcd-digits">0.00</span>
+                  <span class="lcd-unit">g</span>
+                </div>
+              </div>
+
+              <!-- Quick weight chips -->
+              <div class="scale-quick-presets">
+                <span class="preset-chip" data-add="5">+5g</span>
+                <span class="preset-chip" data-add="10">+10g</span>
+                <span class="preset-chip" data-add="25">+25g</span>
+                <span class="preset-chip" data-add="50">+50g</span>
+                <span class="preset-chip" data-add="100">+100g</span>
+                <span class="preset-chip" data-add="250">+250g</span>
+                <span class="preset-chip" data-add="500">+500g</span>
+              </div>
+            </div>
+
+            <!-- Right: Real-time Negotiated Financial Breakdown -->
+            <div class="scale-calc-panel">
+              <div class="calc-row">
+                <span class="calc-label">Línea Seleccionada:</span>
+                <span class="calc-val" id="scale-cat-label" style="color: var(--gold-light);">Oro 18K Nacional</span>
+              </div>
+              <div class="calc-row">
+                <span class="calc-label">Costo Promedio Ponderado /g:</span>
+                <span class="calc-val" id="scale-cost-rate-display" style="color: #94a3b8;">$0 /g</span>
+              </div>
+              <div class="calc-row">
+                <span class="calc-label" style="color: #10b981; font-weight: 700;">Precio Venta Negociado /g ($):</span>
+                <input type="number" id="scale-sale-rate-input" class="form-control mono" style="width: 140px; text-align: right; padding: 4px 8px; font-size: 1rem; font-weight: 800; border-color: #10b981;">
+              </div>
+              <div class="calc-row">
+                <span class="calc-label">Margen Bruto de la Operación:</span>
+                <span class="calc-val" id="scale-margin-display" style="color: #34d399;">+$0 (0%)</span>
+              </div>
+              <div class="calc-row">
+                <span class="calc-label" style="font-weight: 700; color: var(--text-headings);">TOTAL LIQUIDACIÓN VENTA:</span>
+                <span class="calc-val big-gold" id="scale-total-display">$0</span>
+              </div>
+
+              <div style="display: flex; gap: 10px; margin-top: 16px;">
+                <button class="btn btn-gold btn-sm" style="flex: 1;" onclick="App.copyWhatsAppQuote()">
+                  📲 Copiar Cotización WhatsApp
+                </button>
+                <button class="btn btn-outline-gold btn-sm" onclick="App.switchView('despacho')">
+                  ⚡ Llevar a Despacho
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ========================================================= -->
+        <!-- SECCIÓN EN DASHBOARD: CARTERA GENERAL DE CLIENTES (CxC) -->
+        <!-- ========================================================= -->
+        <div class="table-card" style="margin-top: 24px; padding: 22px;">
+          <!-- Header Bar de Cartera en Dashboard -->
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 14px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 16px;">
+            <div>
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <span style="font-size: 1.4rem;">📋</span>
+                <h3 style="font-size: 1.2rem; color: var(--text-headings); margin: 0; font-weight: 800;">
+                  Cartera General de Clientes & Cuentas por Cobrar (CxC)
+                </h3>
+              </div>
+              <p style="font-size: 0.8rem; color: var(--text-dim); margin: 4px 0 0 0;">
+                Estado consolidado de crédito mayorista, saldos adeudados en dinero ($), respaldo contratado en gramos de oro 18K y gestión de cobranza.
+              </p>
+            </div>
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+              <button class="btn btn-outline-gold btn-sm" onclick="App.openNewJoyeriaModal()">
+                + Nueva Joyería
+              </button>
+              <button class="btn btn-gold btn-sm" onclick="App.switchView('cartera-clientes')">
+                Ver Módulo Completo Cartera →
+              </button>
+            </div>
+          </div>
+
+          <!-- Mini KPI Summary Bar de la Cartera en Dashboard -->
+          <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin-bottom: 20px; gap: 14px;">
+            <div class="metric-card" style="padding: 14px 16px; border-left: 3px solid #38bdf8;">
+              <div class="metric-header">
+                <span class="metric-title" style="font-size: 0.72rem;">TOTAL CARTERA EN CALLE</span>
+                <span>💵</span>
+              </div>
+              <div class="metric-value mono" id="dash-cartera-kpi-pesos" style="font-size: 1.35rem; color: var(--info-accent);">$0</div>
+              <div class="metric-sub" id="dash-cartera-kpi-grams" style="font-size: 0.72rem; color: var(--gold-light);">0.00 g Oro 18K equiv.</div>
+            </div>
+
+            <div class="metric-card" style="padding: 14px 16px; border-left: 3px solid #f87171;">
+              <div class="metric-header">
+                <span class="metric-title" style="font-size: 0.72rem;">JOYERÍAS CON SALDO</span>
+                <span>🏬</span>
+              </div>
+              <div class="metric-value mono" id="dash-cartera-kpi-count" style="font-size: 1.35rem; color: #f87171;">0</div>
+              <div class="metric-sub" id="dash-cartera-kpi-clean" style="font-size: 0.72rem; color: var(--text-dim);">0 al día</div>
+            </div>
+
+            <div class="metric-card" style="padding: 14px 16px; border-left: 3px solid var(--gold-primary);">
+              <div class="metric-header">
+                <span class="metric-title" style="font-size: 0.72rem;">CUPO GLOBAL ASIGNADO</span>
+                <span>💳</span>
+              </div>
+              <div class="metric-value mono" id="dash-cartera-kpi-limit" style="font-size: 1.35rem; color: var(--gold-primary);">$0</div>
+              <div class="metric-sub" id="dash-cartera-kpi-usage" style="font-size: 0.72rem; color: var(--text-dim);">0% utilizado</div>
+            </div>
+
+            <div class="metric-card" style="padding: 14px 16px; border-left: 3px solid #10b981;">
+              <div class="metric-header">
+                <span class="metric-title" style="font-size: 0.72rem;">RECAUDO EN RETAL 18K</span>
+                <span>♻️</span>
+              </div>
+              <div class="metric-value mono" id="dash-cartera-kpi-retal-grams" style="font-size: 1.35rem; color: #10b981;">0.00 g</div>
+              <div class="metric-sub" id="dash-cartera-kpi-retal-pesos" style="font-size: 0.72rem; color: var(--text-dim);">Abonos recibidos en metal</div>
+            </div>
+          </div>
+
+          <!-- Controls: Búsqueda rápida y Filtro de estado -->
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
+            <div style="display: flex; gap: 10px; flex: 1; max-width: 600px; flex-wrap: wrap;">
+              <input type="text" id="dash-cartera-search-input" class="form-control" placeholder="🔍 Buscar por joyería, razón social, NIT o ciudad..." style="flex: 1; min-width: 240px;" oninput="App.renderDashboardCartera()">
+              <select id="dash-cartera-status-filter" class="form-control" style="width: 190px;" onchange="App.renderDashboardCartera()">
+                <option value="all">Todas las Joyerías</option>
+                <option value="con-saldo" selected>🔴 Solo con saldo pendiente</option>
+                <option value="al-dia">🟢 Al día (Sin saldo)</option>
+                <option value="cupo-alerta">⚠️ Cupo > 70%</option>
+                <option value="riesgo-c">⚠️ Riesgo C (Observación)</option>
+              </select>
+            </div>
+            <div style="font-size: 0.78rem; color: var(--text-dim);">
+              Mostrando <strong id="dash-cartera-shown-count" style="color: var(--text-headings);">0</strong> joyerías
+            </div>
+          </div>
+
+          <!-- Tabla de Cartera General de Clientes en Dashboard -->
+          <div class="table-responsive">
+            <table class="lux-table">
+              <thead>
+                <tr>
+                  <th>Joyería / Razón Social</th>
+                  <th>Ubicación / Contacto</th>
+                  <th class="text-center">Riesgo</th>
+                  <th class="text-right">Cupo Asignado ($)</th>
+                  <th style="min-width: 140px;">Uso de Cupo</th>
+                  <th class="text-right" style="color: var(--danger-accent);">Deuda Actual ($)</th>
+                  <th class="text-right" style="color: var(--gold-light);">Equiv. Oro 18K</th>
+                  <th>Plazo / Últ. Abono</th>
+                  <th class="text-center">Acciones Rápidas</th>
+                </tr>
+              </thead>
+              <tbody id="dash-cartera-table-body">
+                <!-- Populated dynamically by App.renderDashboardCartera() -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================================================= -->
+      <!-- VIEW 2: ORO PURO 24K & MAQUILA DE TALLERES (NEW!) -->
+      <!-- ========================================================= -->
+      <section id="view-puro" class="view-section" style="display: none;">
+        <div class="page-header">
+          <div class="page-title-group">
+            <h2>Gestión de Oro Puro 24K & Maquila con Talleres</h2>
+            <p class="page-subtitle">Promedia el costo del oro fino (24K), controla las entregas de metal puro a talleres y calcula manos de obra.</p>
+          </div>
+          <div class="header-actions">
+            <button class="btn btn-outline-gold" onclick="App.openNewProveedorModal()">
+              + Nuevo Proveedor / Taller
+            </button>
+            <button class="btn btn-gold" onclick="App.openCompraPuroModal()">
+              + Comprar Oro Puro 24K
+            </button>
+            <button class="btn btn-outline-gold" onclick="App.openEntregaPuroModal()">
+              📤 Entregar Puro a Taller
+            </button>
+            <button class="btn btn-secondary" onclick="App.openRecepcionTallerModal()">
+              📥 Recibir Joyería de Taller
+            </button>
+          </div>
+        </div>
+
+        <!-- Metric KPI Cards for Puro 24k -->
+        <div class="stats-grid">
+          <div class="stat-card accent-gold">
+            <div class="stat-card-header">
+              <span class="stat-label">Oro Puro 24K en Bóveda</span>
+              <div class="stat-icon">👑</div>
+            </div>
+            <div class="stat-value" id="puro-boveda-stock">0.00 g</div>
+            <div class="stat-footer">
+              <span>Valorización a Costo: <strong id="puro-boveda-val">$0</strong></span>
+            </div>
+          </div>
+
+          <div class="stat-card accent-gold">
+            <div class="stat-card-header">
+              <span class="stat-label">Costo Promedio Ponderado 24K</span>
+              <div class="stat-icon">📊</div>
+            </div>
+            <div class="stat-value" id="puro-boveda-avg" style="color: var(--gold-light);">$0 /g</div>
+            <div class="stat-footer">
+              <span>Calculado matemáticamente por cada compra</span>
+            </div>
+          </div>
+
+          <div class="stat-card accent-danger">
+            <div class="stat-card-header">
+              <span class="stat-label">Puro 24K en Poder de Talleres</span>
+              <div class="stat-icon">🏭</div>
+            </div>
+            <div class="stat-value" id="puro-talleres-stock" style="color: #fbbf24;">0.00 g</div>
+            <div class="stat-footer">
+              <span>Metal entregado pendiente de devolución o maquila</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Table: Oro Puro en poder de Talleres & Manos de Obra -->
+        <div class="table-card">
+          <div class="table-header-bar">
+            <div>
+              <h3 style="font-size: 1.1rem; color: var(--text-headings);">Talleres con Oro Puro en su Poder & Manos de Obra</h3>
+              <p style="font-size: 0.78rem; color: var(--text-dim); margin-top: 3px;">Control de saldos de metal entregado para confección y mano de obra adeudada</p>
+            </div>
+          </div>
+          <div class="table-responsive">
+            <table class="lux-table">
+              <thead>
+                <tr>
+                  <th>Taller / Proveedor</th>
+                  <th>Mano de Obra Pactada /g</th>
+                  <th class="text-right">Oro 24K en su Poder (g)</th>
+                  <th class="text-right">Mercancía 18K</th>
+                  <th class="text-right">Mano de Obra Adeudada ($)</th>
+                  <th class="text-center">Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="puro-talleres-table-body">
+                <!-- Populated dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Purchases of Puro Table (Full Width) -->
+        <div class="table-card">
+          <div class="table-header-bar">
+            <div>
+              <h3 style="font-size: 1.1rem; color: var(--gold-light);">Historial de Compras de Oro Puro 24K</h3>
+              <p style="font-size: 0.78rem; color: var(--text-dim); margin-top: 3px;">Compras de granalla pura 999.9 para fundición y maquila mayorista</p>
+            </div>
+            <button class="btn btn-gold" onclick="App.openNewPurchaseModal()">+ Registrar Compra 24K</button>
+          </div>
+          <div class="table-responsive">
+            <table class="lux-table">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Proveedor / Referencia</th>
+                  <th class="text-right">Peso Granalla (g)</th>
+                  <th class="text-right">Costo /g</th>
+                  <th class="text-right">Total Factura ($)</th>
+                </tr>
+              </thead>
+              <tbody id="puro-purchases-body">
+                <!-- Populated dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Deliveries & Receipts (Full Width) -->
+        <div class="table-card">
+          <div class="table-header-bar">
+            <div>
+              <h3 style="font-size: 1.1rem; color: var(--gold-light);">Movimientos de Maquila (Entregas & Recepciones)</h3>
+              <p style="font-size: 0.78rem; color: var(--text-dim); margin-top: 3px;">Registro de oro 24K entregado para manufactura vs. piezas 18K recibidas</p>
+            </div>
+            <button class="btn btn-secondary" onclick="App.openNewDeliveryModal()">+ Registrar Entrega a Taller</button>
+          </div>
+          <div class="table-responsive">
+            <table class="lux-table">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Taller Aliado</th>
+                  <th>Tipo Operación</th>
+                  <th class="text-right">Peso Movido</th>
+                  <th class="text-right">Tasa / Mano de Obra</th>
+                  <th>Observaciones & Notas</th>
+                </tr>
+              </thead>
+              <tbody id="puro-deliveries-body">
+                <!-- Populated dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================================================= -->
+      <!-- VIEW 3: INVENTARIO POR GRAMO -->
+      <!-- ========================================================= -->
+      <section id="view-inventario" class="view-section" style="display: none;">
+        <div class="page-header">
+          <div class="page-title-group">
+            <h2>Inventario en Bóveda Netamente por Gramaje</h2>
+            <p class="page-subtitle">Sin piezas en lote ni precios rígidos: control de peso exacto, costo base y comparación con los promedios.</p>
+          </div>
+          <div class="header-actions" style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+            <button class="btn btn-outline-gold" onclick="App.openManageCategoriesModal()" id="btn-manage-categories">
+              🏷️ Gestionar Categorías
+            </button>
+            <button class="btn btn-gold" onclick="App.openNewItemModal()">
+              + Ingresar Lote de Oro
+            </button>
+          </div>
+        </div>
+
+        <!-- Category Filter Tabs (Rendered dynamically) -->
+        <div class="category-tabs" id="inventory-category-tabs">
+          <button class="cat-tab active" data-category="all">
+            🌟 Todos los Lotes <span class="cat-badge-counter" id="cnt-cat-all">0</span>
+          </button>
+          <button class="cat-tab italian-tab" data-category="italiano">
+            🇮🇹 Oro Italiano 18K (750) <span class="cat-badge-counter" id="cnt-cat-it">0</span>
+          </button>
+          <button class="cat-tab nacional-tab" data-category="nacional">
+            🇨🇴 Oro Nacional 18K <span class="cat-badge-counter" id="cnt-cat-nc">0</span>
+          </button>
+        </div>
+
+        <!-- Search Bar -->
+        <div style="margin-bottom: 24px;">
+          <input type="text" id="inventory-search" class="form-control" placeholder="🔍 Buscar por código, tejido o procedencia (ej. Cartier, Cubana, Bismark, Vicenza)..." style="max-width: 600px;">
+        </div>
+
+        <!-- Inventory Grid -->
+        <div class="items-grid" id="inventory-grid">
+          <!-- Dynamically populated -->
+        </div>
+      </section>
+
+      <!-- ========================================================= -->
+      <!-- ========================================================= -->
+      <!-- VIEW 4: DESPACHO & BALANZA (REMISIONES) -->
+      <!-- ========================================================= -->
+      <section id="view-despacho" class="view-section" style="display: none;">
+        <div class="page-header">
+          <div class="page-title-group">
+            <h2>Despacho Mayorista & Definición de Precio en Caliente</h2>
+            <p class="page-subtitle">Pesa las prendas en balanza digital, pacta el precio de venta en caliente y liquida la remisión con oro o dinero.</p>
+          </div>
+        </div>
+
+        <!-- 1. PASO 1: SELECCIONAR CLIENTE Y PESAR PRENDAS -->
+        <div class="table-card" style="padding: 24px; margin-bottom: 24px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 14px; flex-wrap: wrap; gap: 12px;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <span style="font-size: 1.4rem;">⚖️</span>
+              <div>
+                <h3 style="font-size: 1.15rem; color: var(--text-headings); margin: 0;">1. Estación de Balanza & Prendas a Despachar</h3>
+                <p style="font-size: 0.78rem; color: var(--text-dim); margin: 2px 0 0 0;">Selecciona el cliente mayorista y añade cada pesada al despacho</p>
+              </div>
+            </div>
+            <div id="despacho-client-info" style="display: flex; align-items: center; gap: 10px;">
+              <!-- Populated dynamically when client is selected -->
+            </div>
+          </div>
+
+          <!-- Selector de Cliente Mayorista a Ancho Completo -->
+          <div class="form-group" style="margin-bottom: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-wrap: wrap; gap: 8px;">
+              <label class="form-label" style="font-size: 0.82rem; font-weight: 700; color: var(--gold-light); margin: 0;">Cliente o Joyería Mayorista Destinataria:</label>
+              <button class="btn btn-outline-gold btn-sm" type="button" onclick="App.openNewJoyeriaModal()">+ Registrar Nueva Joyería</button>
+            </div>
+            <select id="despacho-client-select" class="form-control" style="font-size: 0.95rem; font-weight: 600; padding: 12px 16px; border-color: rgba(212,175,55,0.3);">
+              <!-- Populated from JS -->
+            </select>
+          </div>
+
+          <!-- Barra Horizontal de Pesaje & Precio en Caliente -->
+          <div class="weighing-control-card">
+            <div class="weighing-bar-grid">
+              <div>
+                <label class="form-label" style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted);">
+                  Lote de Bóveda a Pesar:
+                </label>
+                <select id="despacho-item-select" class="form-control" style="font-size: 0.88rem;">
+                  <!-- Populated from JS -->
+                </select>
+                <div id="despacho-cost-hint" style="font-size: 0.72rem; color: var(--text-dim); margin-top: 5px; height: 16px;"></div>
+              </div>
+
+              <div>
+                <label class="form-label" style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--gold-light);">
+                  ⚖️ Peso Balanza (g):
+                </label>
+                <input type="number" step="0.01" min="0.01" id="despacho-weight-input" class="form-control mono" placeholder="0.00 g" style="font-size: 1.15rem; font-weight: 800; color: var(--gold-primary); background: var(--bg-surface-elevated); border-color: var(--gold-border);">
+              </div>
+
+              <div>
+                <label class="form-label" style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: #34d399;">
+                  💵 Precio Venta Pactado ($/g):
+                </label>
+                <input type="number" step="1000" min="0" id="despacho-sale-price-input" class="form-control mono" placeholder="$ /g" style="font-size: 1.15rem; font-weight: 800; color: #10b981; background: var(--bg-surface-elevated); border-color: rgba(16,185,129,0.4);">
+              </div>
+
+              <div>
+                <button class="btn btn-gold" type="button" onclick="App.addSelectedItemToDispatch()" style="height: 48px; padding: 0 24px; font-weight: 800; font-size: 0.95rem; white-space: nowrap; display: flex; align-items: center; gap: 8px;">
+                  <span>+</span> Agregar Prenda
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tabla de Prendas Pesadas en este Despacho -->
+          <div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+              <h4 style="font-size: 0.95rem; color: var(--text-headings); text-transform: uppercase; letter-spacing: 0.05em; margin: 0;">
+                Prendas Pesadas en este Despacho
+              </h4>
+              <div style="display: flex; gap: 16px; align-items: center;">
+                <span style="font-size: 0.8rem; color: var(--text-dim);">Peso Total Acumulado:</span>
+                <span class="mono" style="font-weight: 900; font-size: 1.15rem; color: var(--gold-primary);" id="despacho-total-grams">0.00 g</span>
+              </div>
+            </div>
+
+            <div class="table-responsive">
+              <table class="lux-table">
+                <thead>
+                  <tr>
+                    <th>Código</th>
+                    <th>Prenda & Línea</th>
+                    <th class="text-right">Peso Pesado (g)</th>
+                    <th class="text-right">Costo Base /g</th>
+                    <th class="text-right">Venta Pactada /g</th>
+                    <th class="text-right">Margen /g</th>
+                    <th class="text-right">Subtotal Prenda</th>
+                    <th class="text-center">Acción</th>
+                  </tr>
+                </thead>
+                <tbody id="despacho-items-body">
+                  <!-- Populated dynamically -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. PASO 2: LIQUIDACIÓN, RETAL Y MODALIDADES DE PAGO -->
+        <div class="table-card" style="padding: 24px; margin-bottom: 30px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 14px;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <span style="font-size: 1.4rem;">💰</span>
+              <div>
+                <h3 style="font-size: 1.15rem; color: var(--text-headings); margin: 0;">2. Liquidación de la Remisión & Modalidad de Pago</h3>
+                <p style="font-size: 0.78rem; color: var(--text-dim); margin: 2px 0 0 0;">Cruza retal de oro entregado por el cliente, cobro en dinero y saldo a crédito mayorista</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Dos Columnas Espaciosas: Izquierda (Valores & Retal) vs Derecha (Cobros & Remisión) -->
+          <div class="despacho-settlement-grid">
+            
+            <!-- Columna Izquierda: Totales & Recibo de Oro Retal -->
+            <div>
+              <!-- Big Banner Totales -->
+              <div class="despacho-total-banner" style="border: 1px solid var(--gold-border); border-radius: var(--radius-md); padding: 20px; margin-bottom: 20px; box-shadow: var(--shadow-card);">
+                <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;">
+                  <span>Gramos Totales Despachados:</span>
+                  <span class="mono" style="font-weight: 800; font-size: 1.05rem; color: var(--gold-light);" id="despacho-summary-grams">0.00 g</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 10px;">
+                  <span style="font-size: 1.05rem; font-weight: 800; color: var(--text-headings);">TOTAL A LIQUIDAR:</span>
+                  <span class="mono" style="font-size: 2.1rem; font-weight: 900; color: var(--gold-primary); text-shadow: 0 0 15px rgba(212,175,55,0.3);" id="despacho-summary-pesos">$0</span>
+                </div>
+                <div id="despacho-summary-margin" style="font-size: 0.85rem; font-weight: 700; margin-top: 8px; text-align: right; color: #10b981;">
+                  Margen comercial: +$0
+                </div>
+              </div>
+
+              <!-- Retal / Oro Chatarra 18K -->
+              <div class="despacho-scrap-callout">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                  <span style="font-size: 0.9rem; font-weight: 800; color: #f87171; display: flex; align-items: center; gap: 6px;">
+                    <span>♻️</span> Recibir Retal / Oro Chatarra 18K:
+                  </span>
+                  <span class="mono" style="font-size: 1.1rem; font-weight: 900; color: #f87171;" id="pay-scrap-calc">-$0</span>
+                </div>
+                <p style="font-size: 0.74rem; color: var(--text-dim); margin-top: 0; margin-bottom: 14px;">
+                  Si el cliente paga con metal físico, liquida los gramos y la mano de obra pactada para descontar del total.
+                </p>
+
+                <div class="form-row" style="gap: 16px;">
+                  <div>
+                    <label style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 6px;">
+                      Gramos Recibidos (g):
+                    </label>
+                    <input type="number" step="0.01" min="0" id="pay-scrap-grams" class="form-control mono" placeholder="0.00 g" style="font-size: 1rem; font-weight: 700; padding: 12px 14px;" oninput="App.calculatePaymentSettlement(App.dispatchCart.reduce((a,c)=>a+c.subtotal,0))">
+                  </div>
+                  <div>
+                    <label style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 6px;">
+                      Mano de Obra /g ($/g):
+                    </label>
+                    <input type="number" id="pay-scrap-rate" class="form-control mono" value="255000" style="font-size: 1rem; font-weight: 700; padding: 12px 14px;" oninput="App.calculatePaymentSettlement(App.dispatchCart.reduce((a,c)=>a+c.subtotal,0))">
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Columna Derecha: Cobros en Dinero, Crédito y Cierre -->
+            <div>
+              <!-- Cash & Transfer Inputs en Fila Horizontal -->
+              <div class="form-row" style="gap: 16px; margin-bottom: 16px;">
+                <div>
+                  <label class="form-label" style="font-size: 0.78rem; font-weight: 700;">
+                    💵 Abono en Efectivo Bóveda ($):
+                  </label>
+                  <input type="number" id="pay-cash-amount" class="form-control mono" placeholder="$ 0" style="font-size: 1.05rem; font-weight: 700;" oninput="App.calculatePaymentSettlement(App.dispatchCart.reduce((a,c)=>a+c.subtotal,0))">
+                </div>
+                <div>
+                  <label class="form-label" style="font-size: 0.78rem; font-weight: 700;">
+                    🏦 Abono en Transferencia ($):
+                  </label>
+                  <input type="number" id="pay-transfer-amount" class="form-control mono" placeholder="$ 0" style="font-size: 1.05rem; font-weight: 700;" oninput="App.calculatePaymentSettlement(App.dispatchCart.reduce((a,c)=>a+c.subtotal,0))">
+                </div>
+              </div>
+
+              <!-- Saldo a Cartera (Crédito CxC) -->
+              <div class="despacho-credit-callout">
+                <div>
+                  <div class="despacho-credit-callout-title">
+                    ⏳ Saldo Restante a Cartera (Crédito CxC):
+                  </div>
+                  <div style="font-size: 0.72rem; color: var(--text-dim); margin-top: 2px;">
+                    Se cargará automáticamente a la cuenta por cobrar de la joyería.
+                  </div>
+                </div>
+                <div class="mono despacho-credit-balance-val" id="pay-credit-balance">$0</div>
+              </div>
+
+              <div class="form-group" style="margin-bottom: 20px;">
+                <label class="form-label" style="font-size: 0.78rem;">Observaciones & Notas de Remisión:</label>
+                <textarea id="despacho-notes" class="form-control" rows="2" placeholder="Términos comerciales, observaciones de las prendas o flete..."></textarea>
+              </div>
+
+              <button class="btn btn-gold" style="width: 100%; height: 52px; font-size: 1.05rem; font-weight: 900; letter-spacing: 0.04em; text-transform: uppercase;" onclick="App.finalizeDispatch()">
+                ⚡ Generar y Despachar Remisión Legal
+              </button>
+            </div>
+
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================================================= -->
+      <!-- VIEW: DIRECTÓRIO & ADMINISTRACIÓN DE JOYERÍAS (CLIENTES) -->
+      <!-- ========================================================= -->
+      <section id="view-joyerias" class="view-section" style="display: none;">
+        <div class="page-header">
+          <div class="page-title-group">
+            <h2>Directorio & Administración de Joyerías</h2>
+            <p class="page-subtitle">Registra, edita, busca y administra clientes mayoristas, cupos de crédito y contactos comerciales.</p>
+          </div>
+          <div class="header-actions">
+            <button class="btn btn-gold" onclick="App.openNewJoyeriaModal()">
+              + Registrar Nueva Joyería
+            </button>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap;">
+          <input type="text" id="joyerias-search" class="form-control" placeholder="🔍 Buscar por nombre, razón social, NIT, titular o ciudad..." style="max-width: 480px;" oninput="App.renderJoyerias()">
+          <select id="joyerias-risk-filter" class="form-control" style="max-width: 240px;" onchange="App.renderJoyerias()">
+            <option value="all">Todas las calificaciones</option>
+            <option value="A - Excelente">Calificación A - Excelente</option>
+            <option value="B - Normal">Calificación B - Normal</option>
+            <option value="C - Observación">Calificación C - Observación</option>
+          </select>
+        </div>
+
+        <div class="table-card">
+          <div class="table-responsive">
+            <table class="lux-table">
+              <thead>
+                <tr>
+                  <th>Joyería / Razón Social</th>
+                  <th>Titular & Documento</th>
+                  <th>Contacto & WhatsApp</th>
+                  <th>Ciudad</th>
+                  <th class="text-right">Cupo Crédito</th>
+                  <th>Calificación</th>
+                  <th class="text-right">Saldo Cartera</th>
+                  <th class="text-center">Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="joyerias-admin-table-body">
+                <!-- Populated dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================================================= -->
+      <!-- VIEW: CARTERA DE CLIENTES (DETALLE & AUDITORÍA INTEGRAL) -->
+      <!-- ========================================================= -->
+      <section id="view-cartera-clientes" class="view-section" style="display: none;">
+        <div class="page-header">
+          <div class="page-title-group">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span style="font-size: 1.6rem;">💼</span>
+              <h2>Cartera de Clientes - Gestión Detallada de Saldos & Créditos</h2>
+            </div>
+            <p class="page-subtitle">Auditoría pormenorizada por cliente mayorista: saldos en dinero ($), equivalente en oro 18K (g), historial de despachos a crédito y abonos en efectivo o retal.</p>
+          </div>
+          <div class="header-actions">
+            <button class="btn btn-outline-gold" onclick="App.printGlobalCarteraReport()">
+              🖨️ Reporte General
+            </button>
+            <button class="btn btn-gold" onclick="App.openAbonoModal('', 'cxc')">
+              + Registrar Abono Cartera
+            </button>
+          </div>
+        </div>
+
+        <!-- Global Cartera KPIs -->
+        <div class="cartera-kpi-grid">
+          <div class="metric-card gold-border">
+            <div class="metric-label">Cartera Total por Cobrar</div>
+            <div class="metric-value text-gold" id="cartera-kpi-total-pesos">$0</div>
+            <div class="metric-sub" id="cartera-kpi-total-grams">0.00 g Oro 18K equiv.</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Clientes con Saldo Activo</div>
+            <div class="metric-value text-red" id="cartera-kpi-active-clients">0 / 0</div>
+            <div class="metric-sub" id="cartera-kpi-clean-clients">0 al día (sin saldo)</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Cupo Total Otorgado</div>
+            <div class="metric-value" id="cartera-kpi-total-credit-limit">$0</div>
+            <div class="metric-sub" id="cartera-kpi-credit-usage-pct">0% utilizado en promedio</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Recaudos en Retal 18K (Mes)</div>
+            <div class="metric-value text-amber" id="cartera-kpi-retal-grams">0.00 g</div>
+            <div class="metric-sub" id="cartera-kpi-retal-pesos">Valorizado: $0</div>
+          </div>
+        </div>
+
+        <!-- Controls, Search & Filter Bar -->
+        <div class="cartera-filter-bar">
+          <div class="cartera-search-box">
+            <input type="text" id="cartera-search-input" class="form-control" placeholder="🔍 Buscar por nombre de joyería, NIT, titular, ciudad o teléfono..." oninput="App.filterAndRenderCartera()">
+          </div>
+          <div class="cartera-filters-group">
+            <select id="cartera-status-filter" class="form-control" onchange="App.filterAndRenderCartera()">
+              <option value="all">Todos los clientes</option>
+              <option value="con-saldo">Solo con saldo pendiente (> $0)</option>
+              <option value="al-dia">Al día (Saldo $0)</option>
+              <option value="limite-alto">Límite alto (> 70% cupo)</option>
+              <option value="riesgo-c">Calificación C - Observación</option>
+            </select>
+            <select id="cartera-sort-filter" class="form-control" onchange="App.filterAndRenderCartera()">
+              <option value="mayor-deuda-pesos">Mayor saldo ($)</option>
+              <option value="mayor-deuda-gramos">Mayor saldo en oro (g)</option>
+              <option value="mayor-cupo">Mayor cupo de crédito</option>
+              <option value="nombre-az">Nombre Joyería (A-Z)</option>
+              <option value="mayor-uso-cupo">Mayor % uso de cupo</option>
+            </select>
+            <div class="btn-group-toggle">
+              <button id="btn-view-cards" class="btn btn-outline-gold btn-sm active" onclick="App.setCarteraViewMode('cards')" title="Vista Tarjetas Ejecutivas">
+                🗂️ Tarjetas
+              </button>
+              <button id="btn-view-table" class="btn btn-outline-gold btn-sm" onclick="App.setCarteraViewMode('table')" title="Vista Tabla Detallada">
+                📊 Tabla
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Cards View Container -->
+        <div id="cartera-cards-container" class="cartera-cards-grid">
+          <!-- Populated dynamically with rich client cards -->
+        </div>
+
+        <!-- Table View Container -->
+        <div id="cartera-table-container" class="table-card" style="display: none;">
+          <div class="table-responsive">
+            <table class="lux-table">
+              <thead>
+                <tr>
+                  <th>Joyería / Razón Social</th>
+                  <th>Ciudad & Contacto</th>
+                  <th>Calificación</th>
+                  <th class="text-right">Cupo Crédito</th>
+                  <th>Uso de Cupo</th>
+                  <th class="text-right">Saldo Deuda ($)</th>
+                  <th class="text-right">Equiv. Oro 18K</th>
+                  <th>Último Abono</th>
+                  <th class="text-center">Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="cartera-table-body">
+                <!-- Populated dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================================================= -->
+      <!-- VIEW: DIRECTÓRIO & ADMINISTRACIÓN DE PROVEEDORES & TALLERES -->
+      <!-- ========================================================= -->
+      <section id="view-proveedores" class="view-section" style="display: none;">
+        <div class="page-header">
+          <div class="page-title-group">
+            <h2>Directorio & Administración de Proveedores y Talleres</h2>
+            <p class="page-subtitle">Crea, edita y gestiona proveedores, importadores y talleres, tarifas de mano de obra y saldos.</p>
+          </div>
+          <div class="header-actions">
+            <button class="btn btn-gold" onclick="App.openNewProveedorModal()">
+              + Registrar Nuevo Proveedor / Taller
+            </button>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap;">
+          <input type="text" id="proveedores-search" class="form-control" placeholder="🔍 Buscar por nombre del taller, contacto, ciudad..." style="max-width: 480px;" oninput="App.renderProveedoresAdmin()">
+          <select id="proveedores-cat-filter" class="form-control" style="max-width: 260px;" onchange="App.renderProveedoresAdmin()">
+            <option value="all">Todas las categorías</option>
+            <option value="Taller Nacional / Vaciado">Taller Nacional / Vaciado</option>
+            <option value="Importador Italiano">Importador Italiano</option>
+            <option value="Fundición & Granalla 24K">Fundición & Granalla 24K</option>
+            <option value="Orfebre Particular">Orfebre Particular</option>
+          </select>
+        </div>
+
+        <div class="table-card">
+          <div class="table-responsive">
+            <table class="lux-table">
+              <thead>
+                <tr>
+                  <th>Proveedor / Taller</th>
+                  <th>Categoría</th>
+                  <th>Mano de Obra /g</th>
+                  <th>Contacto & Teléfono</th>
+                  <th>Ciudad / Sede</th>
+                  <th class="text-right">Puro 24K en Poder</th>
+                  <th class="text-right">Mercancía 18K</th>
+                  <th class="text-right">Deuda M.O</th>
+                  <th class="text-center">Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="proveedores-admin-table-body">
+                <!-- Populated dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================================================= -->
+      <!-- VIEW 5: CUENTAS POR COBRAR (CxC) -->
+      <!-- ========================================================= -->
+      <section id="view-cxc" class="view-section" style="display: none;">
+        <div class="page-header">
+          <div class="page-title-group">
+            <h2>Cuentas por Cobrar (CxC) - Cartera Mayorista</h2>
+            <p class="page-subtitle">Control de saldos en dinero y gramos de oro equivalentes, límites de crédito y abonos con retal.</p>
+          </div>
+          <div class="header-actions">
+            <button class="btn btn-gold" onclick="App.openNewJoyeriaModal()">
+              + Nuevo Cliente Mayorista
+            </button>
+          </div>
+        </div>
+
+        <div class="table-card">
+          <div class="table-responsive">
+            <table class="lux-table">
+              <thead>
+                <tr>
+                  <th>Cliente Mayorista</th>
+                  <th>Ciudad</th>
+                  <th>Estado Cartera</th>
+                  <th class="text-right">Cupo de Crédito</th>
+                  <th class="text-right">Saldo Deuda ($)</th>
+                  <th class="text-right">Equiv. Oro 18K</th>
+                  <th class="text-center">Acción</th>
+                </tr>
+              </thead>
+              <tbody id="cxc-table-body">
+                <!-- Populated dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================================================= -->
+      <!-- VIEW 6: CUENTAS POR PAGAR & TALLERES (CxP) -->
+      <!-- ========================================================= -->
+      <section id="view-cxp" class="view-section" style="display: none;">
+        <div class="page-header">
+          <div class="page-title-group">
+            <h2>Proveedores & Talleres (Manos de Obra & CxP)</h2>
+            <p class="page-subtitle">Control de tarifas de mano de obra por gramo, oro puro entregado a talleres y liquidaciones.</p>
+          </div>
+          <div class="header-actions">
+            <button class="btn btn-outline-gold" onclick="App.openEntregaPuroModal()">
+              📤 Entregar Puro a Taller
+            </button>
+            <button class="btn btn-gold" onclick="App.openNewProveedorModal()">
+              + Nuevo Proveedor / Taller
+            </button>
+          </div>
+        </div>
+
+        <!-- Casilla para Añadir Proveedor / Taller -->
+        <div class="scale-widget-card" style="margin-bottom: 24px; padding: 22px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span style="font-size: 1.3rem;">🏭</span>
+              <h3 style="font-size: 1.15rem; color: var(--gold-light); margin: 0;">Casilla para Añadir Nuevo Proveedor o Taller</h3>
+            </div>
+            <span class="stat-badge pos">Registro Directo</span>
+          </div>
+
+          <form id="form-quick-supplier" onsubmit="event.preventDefault(); App.submitQuickSupplier();">
+            <div class="quick-supplier-grid">
+              <div class="form-group" style="margin: 0;">
+                <label class="form-label" style="font-size: 0.72rem;">Nombre / Razón Social:</label>
+                <input type="text" id="quick-sup-name" class="form-control" placeholder="ej. Taller & Vaciado El Sol" required>
+              </div>
+              <div class="form-group" style="margin: 0;">
+                <label class="form-label" style="font-size: 0.72rem;">Categoría:</label>
+                <select id="quick-sup-cat" class="form-control">
+                  <option value="Taller Nacional / Vaciado">Taller Nacional / Vaciado</option>
+                  <option value="Importador Italiano">Importador Italiano</option>
+                  <option value="Fundición & Granalla 24K">Fundición & Granalla 24K</option>
+                  <option value="Orfebre Particular">Orfebre Particular</option>
+                </select>
+              </div>
+              <div class="form-group" style="margin: 0;">
+                <label class="form-label" style="font-size: 0.72rem;">Mano de Obra /g ($):</label>
+                <input type="number" id="quick-sup-mo" class="form-control mono" placeholder="ej. 22000" value="22000">
+              </div>
+              <div class="form-group" style="margin: 0;">
+                <label class="form-label" style="font-size: 0.72rem;">Teléfono / WhatsApp:</label>
+                <input type="text" id="quick-sup-phone" class="form-control" placeholder="+57 300 000 0000">
+              </div>
+              <div class="form-group" style="margin: 0;">
+                <label class="form-label" style="font-size: 0.72rem;">Ciudad / Sede:</label>
+                <input type="text" id="quick-sup-city" class="form-control" placeholder="ej. Medellín">
+              </div>
+              <div>
+                <button type="submit" class="btn btn-gold" style="white-space: nowrap; height: 44px; padding: 0 20px; width: 100%; justify-content: center;">
+                  + Guardar Proveedor
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+
+        <div class="table-card">
+          <div class="table-responsive">
+            <table class="lux-table">
+              <thead>
+                <tr>
+                  <th>Proveedor / Taller</th>
+                  <th>Categoría</th>
+                  <th>Mano de Obra /g</th>
+                  <th class="text-right">Puro 24K en Poder</th>
+                  <th class="text-right">Mercancía 18K</th>
+                  <th class="text-right">Deuda Mano Obra</th>
+                  <th class="text-right">Saldo Total ($)</th>
+                  <th class="text-center">Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="cxp-table-body">
+                <!-- Populated dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================================================= -->
+      <!-- VIEW 7: HISTORIAL DE REMISIONES -->
+      <!-- ========================================================= -->
+      <section id="view-remisiones" class="view-section" style="display: none;">
+        <div class="page-header">
+          <div class="page-title-group">
+            <h2>Historial de Remisiones Mayoristas</h2>
+            <p class="page-subtitle">Registro legal de despachos, pesajes por lote y comprobantes de entrega.</p>
+          </div>
+        </div>
+
+        <div class="table-card">
+          <div class="table-responsive">
+            <table class="lux-table">
+              <thead>
+                <tr>
+                  <th>N° Remisión</th>
+                  <th>Fecha</th>
+                  <th>Cliente Mayorista</th>
+                  <th class="text-right">Peso Despachado</th>
+                  <th class="text-right">Valor Total ($)</th>
+                  <th>Estado</th>
+                  <th class="text-center">Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="remisiones-table-body">
+                <!-- Populated dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================================================= -->
+      <!-- VIEW: GESTIÓN DE MÉTODOS DE PAGO -->
+      <!-- ========================================================= -->
+      <section id="view-metodos-pago" class="view-section" style="display: none;">
+        <div class="page-header">
+          <div class="page-title-group">
+            <h2>Gestión de Métodos de Pago</h2>
+            <p class="page-subtitle">Administra cuentas bancarias de transferencias, cajas de efectivo, plazos de crédito mayorista y recepción de retal de oro 18K.</p>
+          </div>
+          <div class="header-actions">
+            <button class="btn btn-gold" onclick="App.openNewPaymentMethodModal()">
+              + Nuevo Método de Pago
+            </button>
+          </div>
+        </div>
+
+        <!-- Metric KPI Cards -->
+        <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin-bottom: 24px;">
+          <div class="metric-card" style="border-left: 3px solid #38bdf8;">
+            <div class="metric-header">
+              <span class="metric-title">Transferencias Bancarias</span>
+              <span style="font-size: 1.2rem;">🏦</span>
+            </div>
+            <div class="metric-value mono" id="pm-stat-transfer" style="color: #38bdf8;">0</div>
+            <div class="metric-sub" id="pm-stat-transfer-sub">Cuentas bancarias activas</div>
+          </div>
+          <div class="metric-card" style="border-left: 3px solid #34d399;">
+            <div class="metric-header">
+              <span class="metric-title">Cajas de Efectivo</span>
+              <span style="font-size: 1.2rem;">💵</span>
+            </div>
+            <div class="metric-value mono" id="pm-stat-cash" style="color: #34d399;">0</div>
+            <div class="metric-sub">Puntos de recaudo físico</div>
+          </div>
+          <div class="metric-card" style="border-left: 3px solid #fbbf24;">
+            <div class="metric-header">
+              <span class="metric-title">Modalidades de Crédito</span>
+              <span style="font-size: 1.2rem;">⏳</span>
+            </div>
+            <div class="metric-value mono" id="pm-stat-credit" style="color: #fbbf24;">0</div>
+            <div class="metric-sub">Plazos configurados (días)</div>
+          </div>
+          <div class="metric-card" style="border-left: 3px solid #f87171;">
+            <div class="metric-header">
+              <span class="metric-title">Pago en Retal 18K</span>
+              <span style="font-size: 1.2rem;">♻️</span>
+            </div>
+            <div class="metric-value mono" id="pm-stat-scrap" style="color: #f87171;">Activo</div>
+            <div class="metric-sub">Cruce con metal físico</div>
+          </div>
+        </div>
+
+        <!-- Filters & Search Toolbar -->
+        <div style="display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; align-items: center; justify-content: space-between;">
+          <div style="display: flex; gap: 12px; flex-wrap: wrap; flex: 1; max-width: 800px;">
+            <input type="text" id="pm-search" class="form-control" placeholder="🔍 Buscar por banco, titular, cuenta, modalidad..." style="max-width: 420px;" oninput="App.renderPaymentMethods()">
+            <select id="pm-type-filter" class="form-control" style="max-width: 260px;" onchange="App.renderPaymentMethods()">
+              <option value="all">Todos los Métodos de Pago</option>
+              <option value="Transferencia">🏦 Transferencias Bancarias</option>
+              <option value="Efectivo">💵 Efectivo / Cajas</option>
+              <option value="Credito">⏳ Crédito Mayorista</option>
+              <option value="Retal Oro">♻️ Retal de Oro 18K</option>
+            </select>
+          </div>
+          <div style="color: var(--text-dim); font-size: 0.82rem;" id="pm-count-indicator">
+            Mostrando 0 métodos
+          </div>
+        </div>
+
+        <!-- Payment Methods Cards Grid -->
+        <div id="pm-cards-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 20px;">
+          <!-- Populated dynamically -->
+        </div>
+      </section>
+
+      <!-- ========================================================= -->
+      <!-- VIEW: CUADRE DE CAJA & ARQUEO DIARIO -->
+      <!-- ========================================================= -->
+      <section id="view-cuadre-caja" class="view-section" style="display: none;">
+        <div class="page-header">
+          <div class="page-title-group">
+            <h2>Cuadre de Caja & Arqueo Diario</h2>
+            <p class="page-subtitle">Auditoría en tiempo real de entradas de dinero y oro, salidas a proveedores, créditos vivos y saldo exacto de cada peso.</p>
+          </div>
+          <div class="header-actions">
+            <button class="btn btn-outline-gold" onclick="App.openNewCashMovementModal()">
+              + Registrar Movimiento / Gasto
+            </button>
+            <button class="btn btn-gold" onclick="App.printCuadreCaja()">
+              🖨️ Imprimir Cuadre Oficial
+            </button>
+          </div>
+        </div>
+
+        <!-- Period Selector Toolbar -->
+        <div style="background: rgba(18, 22, 31, 0.8); border: 1px solid var(--gold-border); border-radius: var(--radius-md); padding: 14px 18px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px;">
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;" id="cuadre-period-tabs">
+            <button class="btn btn-sm btn-gold cuadre-tab active" data-period="hoy" onclick="App.setCuadrePeriod('hoy')">📅 Hoy</button>
+            <button class="btn btn-sm btn-secondary cuadre-tab" data-period="ayer" onclick="App.setCuadrePeriod('ayer')">Ayer</button>
+            <button class="btn btn-sm btn-secondary cuadre-tab" data-period="semana" onclick="App.setCuadrePeriod('semana')">Últimos 7 Días</button>
+            <button class="btn btn-sm btn-secondary cuadre-tab" data-period="mes" onclick="App.setCuadrePeriod('mes')">Este Mes</button>
+            <button class="btn btn-sm btn-secondary cuadre-tab" data-period="todos" onclick="App.setCuadrePeriod('todos')">Histórico Completo</button>
+            <button class="btn btn-sm btn-secondary cuadre-tab" data-period="custom" onclick="App.setCuadrePeriod('custom')">Personalizado...</button>
+          </div>
+
+          <div id="cuadre-custom-range" style="display: none; align-items: center; gap: 8px;">
+            <input type="date" id="cuadre-start-date" class="form-control mono" style="width: 140px; padding: 6px 10px;">
+            <span style="color: var(--text-dim);">a</span>
+            <input type="date" id="cuadre-end-date" class="form-control mono" style="width: 140px; padding: 6px 10px;">
+            <button class="btn btn-gold btn-sm" onclick="App.applyCustomCuadreRange()">Filtrar</button>
+          </div>
+
+          <div style="font-size: 0.8rem; color: var(--gold-light); font-weight: 700;" id="cuadre-active-period-label">
+            Periodo Activo: Hoy (2026-10-19)
+          </div>
+        </div>
+
+        <!-- Hero Metric KPI Cards -->
+        <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); margin-bottom: 24px;">
+          <!-- 1. Total Entradas -->
+          <div class="metric-card" style="border-left: 3px solid #34d399;">
+            <div class="metric-header">
+              <span class="metric-title">TOTAL INGRESOS / ENTRADAS</span>
+              <span style="font-size: 1.25rem;">🟢</span>
+            </div>
+            <div class="metric-value mono" id="cuadre-kpi-inflows" style="color: #34d399;">$0</div>
+            <div class="metric-sub" id="cuadre-kpi-inflows-sub">
+              Efectivo: $0 | Bancos: $0
+            </div>
+            <div style="font-size: 0.72rem; color: #f87171; margin-top: 4px; font-weight: 700;" id="cuadre-kpi-scrap-in">
+              Retal 18K recibido: 0.00g ($0)
+            </div>
+          </div>
+
+          <!-- 2. Total Salidas -->
+          <div class="metric-card" style="border-left: 3px solid #f87171;">
+            <div class="metric-header">
+              <span class="metric-title">TOTAL EGRESOS / SALIDAS</span>
+              <span style="font-size: 1.25rem;">🔴</span>
+            </div>
+            <div class="metric-value mono" id="cuadre-kpi-outflows" style="color: #f87171;">$0</div>
+            <div class="metric-sub" id="cuadre-kpi-outflows-sub">
+              Puro 24K: $0 | Talleres M.O: $0
+            </div>
+            <div style="font-size: 0.72rem; color: var(--text-dim); margin-top: 4px;" id="cuadre-kpi-expenses-sub">
+              Gastos & Operativos: $0
+            </div>
+          </div>
+
+          <!-- 3. Balance Neto -->
+          <div class="metric-card" style="border-left: 3px solid var(--gold-primary);">
+            <div class="metric-header">
+              <span class="metric-title">BALANCE NETO DE CAJA</span>
+              <span style="font-size: 1.25rem;">⚖️</span>
+            </div>
+            <div class="metric-value mono" id="cuadre-kpi-net" style="color: var(--gold-light);">$0</div>
+            <div class="metric-sub" id="cuadre-kpi-net-sub">Flujo neto del período seleccionado</div>
+            <div style="font-size: 0.72rem; color: #34d399; margin-top: 4px; font-weight: 700;" id="cuadre-kpi-net-status">
+              ● Superávit en Tesorería
+            </div>
+          </div>
+
+          <!-- 4. Créditos Otorgados & Cartera -->
+          <div class="metric-card" style="border-left: 3px solid #fbbf24;">
+            <div class="metric-header">
+              <span class="metric-title">CRÉDITOS OTORGADOS</span>
+              <span style="font-size: 1.25rem;">⏳</span>
+            </div>
+            <div class="metric-value mono" id="cuadre-kpi-credits" style="color: #fbbf24;">$0</div>
+            <div class="metric-sub" id="cuadre-kpi-credits-sub">Colocados a plazo en el período</div>
+            <div style="font-size: 0.72rem; color: #f87171; margin-top: 4px; font-weight: 700;" id="cuadre-kpi-cartera-viva">
+              Cartera Viva Total: $0 (0.0g)
+            </div>
+          </div>
+        </div>
+
+        <!-- 2 Columns: Arqueo por Medio de Pago & Pagos a Proveedores -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 24px; margin-bottom: 24px;">
+          <!-- Left: Arqueo por Medio de Pago -->
+          <div class="table-card" style="padding: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+              <h3 style="font-size: 1.05rem; color: var(--text-headings); display: flex; align-items: center; gap: 8px;">
+                <span>💵</span> Arqueo de Saldos por Medio de Pago
+              </h3>
+              <span style="font-size: 0.75rem; color: var(--gold-primary); font-weight: 700;">Global Acumulado</span>
+            </div>
+            <div id="cuadre-methods-container" style="display: flex; flex-direction: column; gap: 10px;">
+              <!-- Populated dynamically -->
+            </div>
+          </div>
+
+          <!-- Right: Pagos a Proveedores y Talleres -->
+          <div class="table-card" style="padding: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+              <h3 style="font-size: 1.05rem; color: var(--text-headings); display: flex; align-items: center; gap: 8px;">
+                <span>🏭</span> Cuánto se Pagó y a qué Proveedor / Taller
+              </h3>
+              <span style="font-size: 0.75rem; color: #f87171; font-weight: 700;" id="cuadre-total-paid-suppliers">$0</span>
+            </div>
+            <div class="table-responsive" style="max-height: 280px; overflow-y: auto;">
+              <table class="lux-table" style="font-size: 0.82rem; min-width: 440px;">
+                <thead>
+                  <tr>
+                    <th>Proveedor / Taller</th>
+                    <th>Categoría</th>
+                    <th class="text-right">Pagado Período</th>
+                    <th class="text-right">Saldo Deuda CxP</th>
+                  </tr>
+                </thead>
+                <tbody id="cuadre-suppliers-table-body">
+                  <!-- Populated dynamically -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Ledger Table: Libro Diario de Movimientos (De dónde entró y salió cada peso) -->
+        <div class="table-card" style="padding: 20px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; flex-wrap: wrap; gap: 14px;">
+            <div>
+              <h3 style="font-size: 1.15rem; color: var(--gold-light); margin-bottom: 4px;">
+                📖 Libro Diario de Caja & Banco (Detalle Transaccional)
+              </h3>
+              <p style="font-size: 0.78rem; color: var(--text-muted); margin: 0;">
+                Auditoría renglón por renglón con comprobantes, origen, destino y saldos acumulados.
+              </p>
+            </div>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+              <input type="text" id="cuadre-search" class="form-control" placeholder="🔍 Buscar movimiento, cliente, ref..." style="max-width: 280px;" oninput="App.filterCuadreLedger()">
+              <select id="cuadre-type-filter" class="form-control" style="max-width: 180px;" onchange="App.filterCuadreLedger()">
+                <option value="all">Todos los flujos</option>
+                <option value="ingreso">🟢 Solo Ingresos (+)</option>
+                <option value="egreso">🔴 Solo Egresos (-)</option>
+                <option value="credito_otorgado">⏳ Solo Créditos</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="table-responsive">
+            <table class="lux-table">
+              <thead>
+                <tr>
+                  <th>Fecha & Hora</th>
+                  <th>Tipo</th>
+                  <th>Concepto & Descripción</th>
+                  <th>Tercero (Cliente / Proveedor)</th>
+                  <th>Medio de Pago</th>
+                  <th>Comprobante / Ref</th>
+                  <th class="text-right" style="color: #34d399;">Entrada ($)</th>
+                  <th class="text-right" style="color: #f87171;">Salida ($)</th>
+                  <th class="text-right">Saldo Caja ($)</th>
+                </tr>
+              </thead>
+              <tbody id="cuadre-ledger-table-body">
+                <!-- Populated dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================================================= -->
+      <!-- VIEW: BALANCE GENERAL FINANCIERO & ESTADO PATRIMONIAL -->
+      <!-- ========================================================= -->
+      <section id="view-balance-general" class="view-section" style="display: none;">
+        <div class="page-header">
+          <div class="page-title-group">
+            <h2>Balance General & Estado Patrimonial</h2>
+            <p class="page-subtitle">Consolidado en tiempo real de activos líquidos, inventario de metales valorizados, cartera de clientes (CxC), pasivos y patrimonio neto.</p>
+          </div>
+          <div class="header-actions">
+            <button class="btn btn-outline-gold" onclick="App.exportBalanceCSV()" title="Exportar Balance Contable a CSV">
+              📥 Exportar CSV
+            </button>
+            <button class="btn btn-gold" onclick="App.openPrintBalanceModal()" title="Imprimir Acta Oficial Certificada">
+              🖨️ Imprimir Balance Oficial
+            </button>
+            <button class="btn btn-secondary" onclick="App.loadBalanceGeneral()" title="Recalcular Balance en Vivo">
+              🔄 Actualizar
+            </button>
+          </div>
+        </div>
+
+        <!-- Banner de Certificación & Estado Contable Cuadrado -->
+        <div class="balance-audit-banner">
+          <div class="audit-banner-left">
+            <div class="audit-status-badge">
+              <span class="pulse-dot"></span>
+              <span>Balance Cuadrado en Tiempo Real</span>
+            </div>
+            <div class="audit-equation-text" id="bg-equation-summary">
+              Activo Total ($0) = Pasivo Total ($0) + Patrimonio Neto ($0)
+            </div>
+          </div>
+          <div class="audit-banner-right">
+            <div class="audit-date-badge">
+              <span>📅 Corte Contable:</span>
+              <strong id="bg-as-of-date">Hoy</strong>
+            </div>
+            <div class="audit-gold-backing" id="bg-gold-backing-pill">
+              👑 Respaldo Físico: 0.00 g 24K eq.
+            </div>
+          </div>
+        </div>
+
+        <!-- 4 Top Executive KPI Cards (Los 4 Pilares del Balance) -->
+        <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); margin-bottom: 24px;">
+          <!-- 1. Total Activos -->
+          <div class="metric-card" style="border-left: 3px solid #38bdf8;">
+            <div class="metric-header">
+              <span class="metric-title">TOTAL ACTIVOS</span>
+              <span style="font-size: 1.3rem;">🏛️</span>
+            </div>
+            <div class="metric-value mono" id="bg-kpi-total-assets" style="color: var(--info-accent);">$0</div>
+            <div class="metric-sub" id="bg-kpi-assets-sub">Equivalente a 0.00g Oro Puro 24K</div>
+            <div class="kpi-mini-tag" id="bg-kpi-assets-tag">Bancos + Metales + Cartera</div>
+          </div>
+
+          <!-- 2. Total Pasivos -->
+          <div class="metric-card" style="border-left: 3px solid #f87171;">
+            <div class="metric-header">
+              <span class="metric-title">TOTAL PASIVOS</span>
+              <span style="font-size: 1.3rem;">💳</span>
+            </div>
+            <div class="metric-value mono" id="bg-kpi-total-liabilities" style="color: var(--danger-accent);">$0</div>
+            <div class="metric-sub" id="bg-kpi-liabilities-sub">Proveedores + Manos de Obra</div>
+            <div class="kpi-mini-tag" id="bg-kpi-liabilities-tag">Apalancamiento: 0.0%</div>
+          </div>
+
+          <!-- 3. Patrimonio Neto (Capital Real) -->
+          <div class="metric-card" style="border-left: 3px solid var(--gold-primary);">
+            <div class="metric-header">
+              <span class="metric-title">PATRIMONIO NETO</span>
+              <span style="font-size: 1.3rem;">👑</span>
+            </div>
+            <div class="metric-value mono" id="bg-kpi-net-worth" style="color: var(--gold-primary);">$0</div>
+            <div class="metric-sub" id="bg-kpi-worth-sub">Capital Real de la Compañía</div>
+            <div class="kpi-mini-tag" id="bg-kpi-solvency-tag">Solvencia: 0.0x (Excelente)</div>
+          </div>
+
+          <!-- 4. Capital de Trabajo Neto -->
+          <div class="metric-card" style="border-left: 3px solid #10b981;">
+            <div class="metric-header">
+              <span class="metric-title">CAPITAL DE TRABAJO</span>
+              <span style="font-size: 1.3rem;">💼</span>
+            </div>
+            <div class="metric-value mono" id="bg-kpi-working-capital" style="color: var(--emerald-accent);">$0</div>
+            <div class="metric-sub" id="bg-kpi-working-sub">Liquidez Operativa Disponible</div>
+            <div class="kpi-mini-tag" id="bg-kpi-acid-tag">Prueba Ácida: 0.0x</div>
+          </div>
+        </div>
+
+        <!-- Asset Allocation Visual Bar (Composición de Activos de Plata y Oro) -->
+        <div class="table-card" style="padding: 20px; margin-bottom: 24px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+            <h4 style="font-size: 0.92rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-headings); margin: 0; display: flex; align-items: center; gap: 8px;">
+              <span>📊</span> Composición Patrimonial del Activo
+            </h4>
+            <span style="font-size: 0.78rem; color: var(--text-dim);">Distribución Dinero Líquido vs. Metales Preciosos vs. Crédito Mayorista</span>
+          </div>
+
+          <!-- Multi-Segment Visual Bar -->
+          <div class="asset-alloc-bar-container">
+            <div class="asset-alloc-segment seg-cash" id="bg-bar-cash" style="width: 25%;" title="Caja & Bancos"></div>
+            <div class="asset-alloc-segment seg-italian" id="bg-bar-it" style="width: 25%;" title="Joyería Italiana 18K"></div>
+            <div class="asset-alloc-segment seg-nacional" id="bg-bar-nc" style="width: 25%;" title="Joyería Nacional 18K"></div>
+            <div class="asset-alloc-segment seg-puro" id="bg-bar-puro" style="width: 15%;" title="Oro Puro 24K"></div>
+            <div class="asset-alloc-segment seg-cxc" id="bg-bar-cxc" style="width: 10%;" title="Cartera CxC"></div>
+          </div>
+
+          <div class="asset-alloc-legend">
+            <div class="alloc-legend-item">
+              <span class="legend-color-dot" style="background: #0284c7;"></span>
+              <span>Caja & Bancos: <strong id="bg-legend-cash-pct">0%</strong> ($<span id="bg-legend-cash-val">0</span>)</span>
+            </div>
+            <div class="alloc-legend-item">
+              <span class="legend-color-dot" style="background: #059669;"></span>
+              <span>Joyería Italiana 18K: <strong id="bg-legend-it-pct">0%</strong> ($<span id="bg-legend-it-val">0</span>)</span>
+            </div>
+            <div class="alloc-legend-item">
+              <span class="legend-color-dot" style="background: #d97706;"></span>
+              <span>Joyería Nacional 18K: <strong id="bg-legend-nc-pct">0%</strong> ($<span id="bg-legend-nc-val">0</span>)</span>
+            </div>
+            <div class="alloc-legend-item">
+              <span class="legend-color-dot" style="background: #eab308;"></span>
+              <span>Oro Puro 24K: <strong id="bg-legend-puro-pct">0%</strong> ($<span id="bg-legend-puro-val">0</span>)</span>
+            </div>
+            <div class="alloc-legend-item">
+              <span class="legend-color-dot" style="background: #8b5cf6;"></span>
+              <span>Cartera Clientes (CxC): <strong id="bg-legend-cxc-pct">0%</strong> ($<span id="bg-legend-cxc-val">0</span>)</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Doble Partida NIIF a 2 Columnas (Activos vs Pasivos + Patrimonio) -->
+        <div class="balance-sheet-grid">
+          
+          <!-- COLUMNA IZQUIERDA: ACTIVOS (RECURSOS PROPIOS) -->
+          <div class="balance-column">
+            <div class="balance-column-header col-activos">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 1.2rem;">🏛️</span>
+                <h3 style="margin: 0; font-size: 1.1rem; color: #fff;">ESTADO DE ACTIVOS</h3>
+              </div>
+              <span class="mono" style="font-size: 1.15rem; font-weight: 800; color: #38bdf8;" id="bg-col-total-assets">$0</span>
+            </div>
+
+            <!-- Grupo A: Activos Disponibles (Caja & Bancos) -->
+            <div class="balance-category-card">
+              <div class="cat-card-header">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span style="font-size: 1.1rem;">💵</span>
+                  <div>
+                    <h4 style="margin: 0; font-size: 0.95rem; color: var(--text-headings);">1. Activos Disponibles (Caja & Bancos)</h4>
+                    <p style="margin: 0; font-size: 0.72rem; color: var(--text-dim);">Recursos líquidos en cuentas bancarias y caja fuerte de bóveda</p>
+                  </div>
+                </div>
+                <span class="mono cat-subtotal" id="bg-subtotal-disponible">$0</span>
+              </div>
+              <div class="cat-card-body" id="bg-list-disponible">
+                <!-- Populated dynamically -->
+              </div>
+            </div>
+
+            <!-- Grupo B: Activos Exigibles (Cartera por Cobrar CxC) -->
+            <div class="balance-category-card">
+              <div class="cat-card-header">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span style="font-size: 1.1rem;">📈</span>
+                  <div>
+                    <h4 style="margin: 0; font-size: 0.95rem; color: var(--text-headings);">2. Activos Exigibles (Cuentas por Cobrar - CxC)</h4>
+                    <p style="margin: 0; font-size: 0.72rem; color: var(--text-dim);">Cartera colocada a crédito con joyerías aliadas respaldada en oro</p>
+                  </div>
+                </div>
+                <span class="mono cat-subtotal" id="bg-subtotal-exigible">$0</span>
+              </div>
+              <div class="cat-card-body">
+                <div class="balance-detail-callout">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <span style="font-size: 0.8rem; color: var(--text-muted); font-weight: 700;">Gramos 18K que respaldan la cartera:</span>
+                    <strong class="mono" style="color: var(--gold-primary); font-size: 0.95rem;" id="bg-cxc-grams-backing">0.00 g 18K</strong>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-size: 0.8rem; color: var(--text-muted); font-weight: 700;">Joyerías deudoras activas:</span>
+                    <strong style="color: var(--text-headings); font-size: 0.9rem;" id="bg-cxc-clients-count">0 joyerías</strong>
+                  </div>
+                </div>
+                <div id="bg-list-exigible" style="display: flex; flex-direction: column; gap: 8px; margin-top: 10px;">
+                  <!-- Top debtors populated dynamically -->
+                </div>
+              </div>
+            </div>
+
+            <!-- Grupo C: Activos Realizables (Inventario Físico de Metales) -->
+            <div class="balance-category-card">
+              <div class="cat-card-header">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span style="font-size: 1.1rem;">👑</span>
+                  <div>
+                    <h4 style="margin: 0; font-size: 0.95rem; color: var(--text-headings);">3. Inventario Físico de Metales Preciosos</h4>
+                    <p style="margin: 0; font-size: 0.72rem; color: var(--text-dim);">Prendas 18K en bóveda, granalla 24K y metal entregado en maquila</p>
+                  </div>
+                </div>
+                <span class="mono cat-subtotal" id="bg-subtotal-realizable">$0</span>
+              </div>
+              <div class="cat-card-body" id="bg-list-realizable">
+                <!-- Inventory lines populated dynamically -->
+              </div>
+            </div>
+
+            <!-- Gran Total Activos Bar -->
+            <div class="balance-grand-total-box box-activos">
+              <div>
+                <div style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); font-weight: 700;">TOTAL ACTIVO BRUTO CONSOLIDADO:</div>
+                <div style="font-size: 0.82rem; color: var(--text-muted); margin-top: 2px;">Recursos económicos en poder de Nexus Joyas S.A.S</div>
+              </div>
+              <div class="text-right">
+                <div class="mono" style="font-size: 1.6rem; font-weight: 900; color: var(--info-accent);" id="bg-grand-total-assets">$0</div>
+                <div class="mono" style="font-size: 0.82rem; color: var(--gold-light); font-weight: 700;" id="bg-grand-total-assets-grams">0.00 g 24K eq.</div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- COLUMNA DERECHA: PASIVOS & PATRIMONIO NETO -->
+          <div class="balance-column">
+            <div class="balance-column-header col-pasivos">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 1.2rem;">⚖️</span>
+                <h3 style="margin: 0; font-size: 1.1rem; color: #fff;">PASIVOS & PATRIMONIO</h3>
+              </div>
+              <span class="mono" style="font-size: 1.15rem; font-weight: 800; color: var(--gold-primary);" id="bg-col-total-liab-equity">$0</span>
+            </div>
+
+            <!-- Grupo A: Pasivos con Proveedores (CxP) -->
+            <div class="balance-category-card">
+              <div class="cat-card-header">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span style="font-size: 1.1rem;">🏭</span>
+                  <div>
+                    <h4 style="margin: 0; font-size: 0.95rem; color: var(--text-headings);">1. Pasivos Corrientes con Proveedores (CxP)</h4>
+                    <p style="margin: 0; font-size: 0.72rem; color: var(--text-dim);">Obligaciones por compras de oro puro 24K e importación italiana</p>
+                  </div>
+                </div>
+                <span class="mono cat-subtotal" style="color: var(--danger-accent);" id="bg-subtotal-cxp-prov">$0</span>
+              </div>
+              <div class="cat-card-body" id="bg-list-pasivos-prov">
+                <!-- Populated dynamically -->
+              </div>
+            </div>
+
+            <!-- Grupo B: Obligaciones por Manos de Obra -->
+            <div class="balance-category-card">
+              <div class="cat-card-header">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span style="font-size: 1.1rem;">🔨</span>
+                  <div>
+                    <h4 style="margin: 0; font-size: 0.95rem; color: var(--text-headings);">2. Obligaciones por Manos de Obra (Talleres)</h4>
+                    <p style="margin: 0; font-size: 0.72rem; color: var(--text-dim);">Saldos pendientes de liquidar a talleres aliados por confección</p>
+                  </div>
+                </div>
+                <span class="mono cat-subtotal" style="color: var(--danger-accent);" id="bg-subtotal-cxp-talleres">$0</span>
+              </div>
+              <div class="cat-card-body" id="bg-list-pasivos-talleres">
+                <!-- Populated dynamically -->
+              </div>
+            </div>
+
+            <!-- Subtotal Pasivos Box -->
+            <div class="balance-subtotal-strip">
+              <span>TOTAL PASIVOS EXIGIBLES (DEUDA TOTAL):</span>
+              <strong class="mono" style="color: var(--danger-accent); font-size: 1.15rem;" id="bg-total-liabilities-strip">$0</strong>
+            </div>
+
+            <!-- Grupo C: Patrimonio Neto / Capital de los Socios -->
+            <div class="balance-category-card" style="border: 1px solid var(--gold-border);">
+              <div class="cat-card-header" style="background: rgba(212, 175, 55, 0.08);">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span style="font-size: 1.2rem;">👑</span>
+                  <div>
+                    <h4 style="margin: 0; font-size: 1rem; color: var(--gold-primary);">3. Patrimonio Neto & Capital Contable</h4>
+                    <p style="margin: 0; font-size: 0.72rem; color: var(--text-dim);">Valor real líquido de la compañía una vez cubiertas todas las deudas</p>
+                  </div>
+                </div>
+                <span class="mono cat-subtotal" style="color: var(--gold-primary); font-size: 1.15rem;" id="bg-subtotal-patrimonio">$0</span>
+              </div>
+              <div class="cat-card-body">
+                <div class="balance-line-item">
+                  <div>
+                    <div style="font-weight: 700; color: var(--text-headings);">Capital Social Inicial & Aportes de Bóveda</div>
+                    <div style="font-size: 0.72rem; color: var(--text-dim);">Fondo inicial de apertura en dinero y metales preciosos</div>
+                  </div>
+                  <span class="mono line-val" id="bg-patrimonio-capital-social">$0</span>
+                </div>
+
+                <div class="balance-line-item">
+                  <div>
+                    <div style="font-weight: 700; color: var(--text-headings);">Utilidad Acumulada / Margen en Remisiones</div>
+                    <div style="font-size: 0.72rem; color: var(--text-dim);">Ganancia comercial generada en despachos de joyería</div>
+                  </div>
+                  <span class="mono line-val" style="color: var(--emerald-accent);" id="bg-patrimonio-utilidad">$0</span>
+                </div>
+
+                <div class="balance-line-item">
+                  <div>
+                    <div style="font-weight: 700; color: var(--text-headings);">Valorización en Oro Fino 24K Equivalente</div>
+                    <div style="font-size: 0.72rem; color: var(--text-dim);">Respaldo en metal puro del patrimonio de los socios</div>
+                  </div>
+                  <span class="mono line-val" style="color: var(--gold-primary); font-weight: 800;" id="bg-patrimonio-grams-eq">0.00 g 24K</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Gran Total Pasivos + Patrimonio Bar (Coincide con Activos) -->
+            <div class="balance-grand-total-box box-pasivos-patrimonio">
+              <div>
+                <div style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); font-weight: 700;">TOTAL PASIVO + PATRIMONIO NETO:</div>
+                <div style="font-size: 0.82rem; color: #10b981; margin-top: 2px;">✓ Ecuación Patrimonial Cuadrada al 100%</div>
+              </div>
+              <div class="text-right">
+                <div class="mono" style="font-size: 1.6rem; font-weight: 900; color: var(--gold-primary);" id="bg-grand-total-liab-equity">$0</div>
+                <div class="mono" style="font-size: 0.82rem; color: var(--gold-light); font-weight: 700;">Cuadre Contable NIIF</div>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+
+        <!-- Ratios de Salud Financiera & Solvencia Mayorista -->
+        <div class="table-card" style="padding: 22px; margin-top: 24px;">
+          <h4 style="font-size: 1rem; color: var(--text-headings); margin-bottom: 16px; display: flex; align-items: center; gap: 8px;">
+            <span>🔬</span> Diagnóstico Financiero & Ratios de Solvencia Joyera
+          </h4>
+          <div class="ratios-grid">
+            <div class="ratio-kpi-card">
+              <div class="ratio-kpi-header">
+                <span class="ratio-label">Razón Corriente (Liquidez)</span>
+                <span class="ratio-pill pill-pos">Excelente</span>
+              </div>
+              <div class="ratio-val mono" id="bg-ratio-solvency">0.00x</div>
+              <div class="ratio-desc">Activo Total / Pasivo Total. Cada $1 de deuda está respaldado por <span id="bg-ratio-solvency-text">$0</span> en activos.</div>
+            </div>
+
+            <div class="ratio-kpi-card">
+              <div class="ratio-kpi-header">
+                <span class="ratio-label">Prueba Ácida Inmediata</span>
+                <span class="ratio-pill pill-pos">Sólida</span>
+              </div>
+              <div class="ratio-val mono" id="bg-ratio-acid">0.00x</div>
+              <div class="ratio-desc">(Caja + Bancos + Cartera) / Pasivos. Capacidad de pago inmediato sin vender inventario de metales.</div>
+            </div>
+
+            <div class="ratio-kpi-card">
+              <div class="ratio-kpi-header">
+                <span class="ratio-label">Nivel de Endeudamiento</span>
+                <span class="ratio-pill pill-neutral">Bajo Riesgo</span>
+              </div>
+              <div class="ratio-val mono" id="bg-ratio-debt-pct">0.0%</div>
+              <div class="ratio-desc">Pasivo Total / Activo Total. Proporción del negocio financiada por proveedores y terceros.</div>
+            </div>
+
+            <div class="ratio-kpi-card">
+              <div class="ratio-kpi-header">
+                <span class="ratio-label">Concentración en Metales</span>
+                <span class="ratio-pill pill-gold">Metal Físico</span>
+              </div>
+              <div class="ratio-val mono" id="bg-ratio-metal-pct">0.0%</div>
+              <div class="ratio-desc">Porcentaje del activo custodiado en inventario físico de oro (18K, 24K y maquila en talleres).</div>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ========================================================= -->
+      <!-- VIEW 10: GASTOS OPERATIVOS (OPEX) -->
+      <!-- ========================================================= -->
+      <section id="view-gastos-operativos" class="view-section" style="display: none;">
+        
+        <!-- Header & Action Buttons -->
+        <div class="page-header">
+          <div class="page-title-group">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span style="font-size: 1.8rem;">📋</span>
+              <div>
+                <h2>Gastos Operativos (OPEX) & Egresos de Bóveda</h2>
+                <p class="page-subtitle">Auditoría y control de costos fijos, nómina mayorista, blindaje, pólizas de metales, arrendamientos y suministros.</p>
+              </div>
+            </div>
+          </div>
+          <div class="header-actions">
+            <button class="btn btn-gold" id="btn-open-new-gasto" onclick="App.openModalNuevoGasto()">
+              ➕ Registrar Gasto
+            </button>
+            <button class="btn btn-outline-gold" id="btn-export-gastos-csv" onclick="App.exportGastosCSV()">
+              📥 Exportar CSV
+            </button>
+            <button class="btn btn-outline-gold" id="btn-print-gastos-report" onclick="App.openPrintGastosModal()">
+              🖨️ Reporte Certificado
+            </button>
+          </div>
+        </div>
+
+        <!-- Period Selector & Date Controls Strip -->
+        <div class="table-card" style="padding: 16px 20px; margin-bottom: 20px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+              <span style="font-size: 0.8rem; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em;">
+                📅 Período Contable:
+              </span>
+              <div class="period-button-group" id="gastos-period-buttons">
+                <button type="button" class="btn-period" data-period="hoy" onclick="App.setGastosPeriod('hoy')">Hoy</button>
+                <button type="button" class="btn-period" data-period="ayer" onclick="App.setGastosPeriod('ayer')">Ayer</button>
+                <button type="button" class="btn-period" data-period="semana" onclick="App.setGastosPeriod('semana')">Esta Semana</button>
+                <button type="button" class="btn-period active" data-period="mes" onclick="App.setGastosPeriod('mes')">Este Mes</button>
+                <button type="button" class="btn-period" data-period="mes_anterior" onclick="App.setGastosPeriod('mes_anterior')">Mes Anterior</button>
+                <button type="button" class="btn-period" data-period="ano" onclick="App.setGastosPeriod('ano')">Este Año</button>
+                <button type="button" class="btn-period" data-period="custom" onclick="App.toggleGastosCustomDateRange()">Personalizado ▾</button>
+              </div>
+            </div>
+
+            <!-- Audit Status Pills -->
+            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+              <div class="audit-date-badge" id="gastos-period-badge">
+                <span>Corte:</span>
+                <strong id="gastos-period-label">Este Mes</strong>
+              </div>
+              <div class="audit-gold-backing" id="gastos-benchmark-pill">
+                👑 Benchmark 24K: $405,000/g
+              </div>
+            </div>
+          </div>
+
+          <!-- Collapsible Custom Date Range Picker -->
+          <div id="gastos-custom-range-container" style="display: none; margin-top: 14px; padding-top: 14px; border-top: 1px dashed rgba(255,255,255,0.1); align-items: center; gap: 12px; flex-wrap: wrap;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <label style="font-size: 0.8rem; color: var(--text-muted); font-weight: 600;">Desde:</label>
+              <input type="date" id="gastos-date-start" class="form-control" style="width: 160px; padding: 6px 10px; font-size: 0.85rem;">
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <label style="font-size: 0.8rem; color: var(--text-muted); font-weight: 600;">Hasta:</label>
+              <input type="date" id="gastos-date-end" class="form-control" style="width: 160px; padding: 6px 10px; font-size: 0.85rem;">
+            </div>
+            <button type="button" class="btn btn-gold btn-sm" onclick="App.applyGastosCustomDateRange()" style="padding: 6px 14px;">
+              Aplicar Rango
+            </button>
+          </div>
+        </div>
+
+        <!-- 4 Top Executive KPI Cards -->
+        <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); margin-bottom: 24px;">
+          
+          <!-- KPI 1: Total Gastos Operativos -->
+          <div class="metric-card" style="border-left: 3px solid #ef4444;">
+            <div class="metric-header">
+              <span class="metric-title">TOTAL GASTOS OPERATIVOS</span>
+              <span style="font-size: 1.3rem;">💸</span>
+            </div>
+            <div class="metric-value mono" id="gastos-kpi-total" style="color: #f87171;">$0</div>
+            <div class="metric-sub" id="gastos-kpi-total-grams">Equivalente a 0.00g Oro Puro 24K</div>
+            <div class="kpi-mini-tag" id="gastos-kpi-total-tag">0 transacciones registradas</div>
+          </div>
+
+          <!-- KPI 2: Gasto Promedio Diario -->
+          <div class="metric-card" style="border-left: 3px solid #f59e0b;">
+            <div class="metric-header">
+              <span class="metric-title">GASTO PROMEDIO DIARIO</span>
+              <span style="font-size: 1.3rem;">⏱️</span>
+            </div>
+            <div class="metric-value mono" id="gastos-kpi-daily" style="color: #fbbf24;">$0</div>
+            <div class="metric-sub" id="gastos-kpi-daily-sub">Tasa de quema operativa (Burn Rate)</div>
+            <div class="kpi-mini-tag">Calculado en el período activo</div>
+          </div>
+
+          <!-- KPI 3: Categoría de Mayor Impacto -->
+          <div class="metric-card" style="border-left: 3px solid #8b5cf6;">
+            <div class="metric-header">
+              <span class="metric-title">MAYOR CENTRO DE COSTOS</span>
+              <span style="font-size: 1.3rem;" id="gastos-kpi-top-icon">🏷️</span>
+            </div>
+            <div class="metric-value" id="gastos-kpi-top-cat" style="color: #a78bfa; font-size: 1.25rem; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Sin datos</div>
+            <div class="metric-sub" id="gastos-kpi-top-cat-sub">0.0% del gasto total ($0)</div>
+            <div class="kpi-mini-tag" id="gastos-kpi-top-cat-tag">Categoría dominante</div>
+          </div>
+
+          <!-- KPI 4: Ratio OPEX / Ventas Brutas -->
+          <div class="metric-card" style="border-left: 3px solid #38bdf8;">
+            <div class="metric-header">
+              <span class="metric-title">RATIO OPEX / VENTAS</span>
+              <span style="font-size: 1.3rem;">⚖️</span>
+            </div>
+            <div class="metric-value mono" id="gastos-kpi-ratio-sales" style="color: #38bdf8;">0.0%</div>
+            <div class="metric-sub" id="gastos-kpi-ratio-sales-sub">Sobre ventas en remisiones ($0)</div>
+            <div class="kpi-mini-tag" id="gastos-kpi-efficiency-tag">Eficiencia Operativa</div>
+          </div>
+
+        </div>
+
+        <!-- Visual Distribution of Operational Expenses by Category -->
+        <div class="table-card" style="padding: 20px; margin-bottom: 24px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
+            <h4 style="font-size: 0.92rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-headings); margin: 0; display: flex; align-items: center; gap: 8px;">
+              <span>📊</span> Distribución de Gastos por Categoría
+            </h4>
+            <span style="font-size: 0.78rem; color: var(--text-dim);">Haz clic en cualquier categoría para filtrar la tabla</span>
+          </div>
+
+          <!-- Multi-Segment Visual Bar -->
+          <div class="asset-alloc-bar-container" id="gastos-category-bar" style="background: rgba(255,255,255,0.06); height: 16px; border-radius: 8px; overflow: hidden; display: flex; margin-bottom: 16px;">
+            <!-- Filled dynamically -->
+          </div>
+
+          <!-- Legend Tags -->
+          <div class="asset-alloc-legend" id="gastos-category-legend" style="display: flex; flex-wrap: wrap; gap: 14px;">
+            <!-- Filled dynamically -->
+          </div>
+        </div>
+
+        <!-- Filters, Search & Table Card -->
+        <div class="table-card" style="padding: 20px;">
+          
+          <!-- Filters Strip -->
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px; margin-bottom: 18px; padding-bottom: 16px; border-bottom: 1px solid rgba(255,255,255,0.08);">
+            
+            <div style="display: flex; align-items: center; gap: 10px; flex: 1; min-width: 280px; max-width: 450px;">
+              <span style="font-size: 1.1rem; color: var(--text-dim);">🔍</span>
+              <input type="text" id="gastos-search-input" class="form-control" placeholder="Buscar concepto, proveedor, factura..." oninput="App.onGastosSearch(this.value)">
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <label style="font-size: 0.78rem; color: var(--text-dim); font-weight: 700; text-transform: uppercase;">Categoría:</label>
+                <select id="gastos-filter-category" class="form-control" style="width: 220px; font-size: 0.85rem;" onchange="App.setGastosCategoryFilter(this.value)">
+                  <option value="all">Todas las Categorías</option>
+                  <option value="Nómina & Comisiones Mayoristas">👥 Nómina & Comisiones</option>
+                  <option value="Seguridad, Blindaje & Transporte">🛡️ Seguridad & Blindaje</option>
+                  <option value="Arrendamiento & Mantenimiento Bóveda">🏢 Arrendamiento Bóveda</option>
+                  <option value="Pólizas de Seguro de Metales">📜 Pólizas de Seguro</option>
+                  <option value="Suministros de Bóveda & Empaque">📦 Suministros & Empaque</option>
+                  <option value="Servicios Públicos & Conectividad">⚡ Servicios & Conectividad</option>
+                  <option value="Gastos Bancarios & 4x1000">🏦 Gastos Bancarios & 4x1000</option>
+                  <option value="Honorarios Legales & Auditoría">⚖️ Honorarios & Auditoría</option>
+                  <option value="Viáticos & Giras Comerciales">✈️ Viáticos & Giras</option>
+                  <option value="Gastos Varios & Caja Menor">☕ Gastos Varios / Caja Menor</option>
+                </select>
+              </div>
+
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <label style="font-size: 0.78rem; color: var(--text-dim); font-weight: 700; text-transform: uppercase;">Medio:</label>
+                <select id="gastos-filter-method" class="form-control" style="width: 210px; font-size: 0.85rem;" onchange="App.setGastosMethodFilter(this.value)">
+                  <option value="all">Todos los Medios / Cuentas</option>
+                </select>
+              </div>
+
+              <button type="button" class="btn btn-secondary btn-sm" onclick="App.resetGastosFilters()" title="Limpiar todos los filtros" style="padding: 7px 12px; font-size: 0.8rem;">
+                ✕ Limpiar
+              </button>
+            </div>
+
+          </div>
+
+          <!-- Expenses Table -->
+          <div class="table-responsive">
+            <table class="data-table" id="gastos-table">
+              <thead>
+                <tr>
+                  <th style="width: 110px;">Fecha</th>
+                  <th>Concepto / Detalle</th>
+                  <th style="width: 190px;">Categoría</th>
+                  <th style="width: 170px;">Medio / Cuenta</th>
+                  <th style="width: 170px;">Beneficiario / Proveedor</th>
+                  <th style="width: 120px;">Comprobante</th>
+                  <th style="width: 130px; text-align: right;">Monto (COP)</th>
+                  <th style="width: 250px; text-align: center;">Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="gastos-table-body">
+                <!-- Dynamically populated -->
+              </tbody>
+              <tfoot>
+                <tr style="background: rgba(212, 175, 55, 0.08); font-weight: 800;">
+                  <td colspan="6" style="padding: 12px 16px; color: var(--text-headings); font-size: 0.9rem;">
+                    TOTAL EGRESOS DEL PERÍODO (<span id="gastos-foot-count">0</span> registros):
+                  </td>
+                  <td style="padding: 12px 16px; text-align: right; color: #f87171; font-size: 1.05rem;" class="mono" id="gastos-foot-total">
+                    $0
+                  </td>
+                  <td style="padding: 12px 16px; text-align: center; color: var(--gold-light); font-size: 0.8rem;" class="mono" id="gastos-foot-grams">
+                    0.00g 24K eq.
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+
+        </div>
+
+      </section>
+
+      <!-- VIEW: GESTIÓN DE USUARIOS, ROLES & PERMISOS (RBAC) -->
+      <section id="view-usuarios" class="view-section" style="display: none;">
+        <!-- Header with Title & Action Button -->
+        <div class="page-header" style="margin-bottom: 22px;">
+          <div class="page-title-group">
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <span style="font-size: 1.85rem;">🛡️</span>
+              <div>
+                <h2 style="margin: 0; font-size: 1.5rem; letter-spacing: 0.02em;">Gestión de Usuarios, Roles & Permisos</h2>
+                <p class="page-subtitle" style="margin: 4px 0 0 0; color: var(--text-dim); font-size: 0.82rem;">
+                  Control de acceso RBAC, gestión de credenciales y matriz granular de privilegios (ver, modificar, eliminar y exportar)
+                </p>
+              </div>
+            </div>
+          </div>
+          <div class="header-actions">
+            <button class="btn btn-gold" id="btn-open-new-user" onclick="App.openNewUserModal()" style="display: inline-flex; align-items: center; gap: 6px; padding: 9px 18px; font-weight: 700;">
+              <span>➕</span> Nuevo Usuario
+            </button>
+          </div>
+        </div>
+
+        <!-- Sleek Horizontal Navigation Tabs -->
+        <div style="display: flex; justify-content: flex-start; margin-bottom: 22px;">
+          <div class="users-segmented-tabs">
+            <button type="button" class="users-tab-btn active" id="tab-btn-users" onclick="App.switchUsersTab('directorio')">
+              <span style="font-size: 1rem;">👥</span> Directorio de Usuarios (<span id="users-count-tab">0</span>)
+            </button>
+            <button type="button" class="users-tab-btn" id="tab-btn-permissions" onclick="App.switchUsersTab('matriz')">
+              <span style="font-size: 1rem;">🔐</span> Matriz de Permisos por Rol
+            </button>
+          </div>
+        </div>
+
+        <!-- TAB 1: DIRECTORIO DE USUARIOS -->
+        <div id="users-tab-directorio">
+          <!-- 4 Top Executive Stat Cards -->
+          <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; margin-bottom: 22px;">
+            <div class="stat-card accent-gold">
+              <div class="stat-card-header">
+                <span class="stat-label">USUARIOS TOTALES</span>
+                <div class="stat-icon" style="color: var(--gold-primary);">👥</div>
+              </div>
+              <div class="stat-value mono" id="kpi-users-total" style="color: var(--gold-light);">0</div>
+              <div class="stat-footer">
+                <span>Personal registrado en sistema</span>
+              </div>
+            </div>
+
+            <div class="stat-card accent-emerald">
+              <div class="stat-card-header">
+                <span class="stat-label">USUARIOS ACTIVOS</span>
+                <div class="stat-icon" style="color: #34d399;">🟢</div>
+              </div>
+              <div class="stat-value mono" id="kpi-users-active" style="color: #34d399;">0</div>
+              <div class="stat-footer">
+                <span class="stat-badge pos">Habilitados para ingresar</span>
+              </div>
+            </div>
+
+            <div class="stat-card accent-gold">
+              <div class="stat-card-header">
+                <span class="stat-label">SUPER ADMINISTRADOR</span>
+                <div class="stat-icon" style="color: #fbbf24;">👑</div>
+              </div>
+              <div class="stat-value" id="kpi-users-superadmin" style="font-size: 1.35rem; color: #fbe38e; font-weight: 800;">Dueño Master</div>
+              <div class="stat-footer">
+                <span>Acceso irrestricto de bóveda</span>
+              </div>
+            </div>
+
+            <div class="stat-card">
+              <div class="stat-card-header">
+                <span class="stat-label">ROLES CONFIGURADOS</span>
+                <div class="stat-icon" style="color: #38bdf8;">🛡️</div>
+              </div>
+              <div class="stat-value mono" id="kpi-users-roles" style="color: #38bdf8;">6 Roles</div>
+              <div class="stat-footer">
+                <span>Matriz granular RBAC activa</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Filters & Search Toolbar -->
+          <div class="table-card" style="padding: 16px 20px; margin-bottom: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px;">
+              <div style="display: flex; align-items: center; gap: 10px; flex: 1; min-width: 260px; max-width: 440px;">
+                <span style="font-size: 1.1rem; color: var(--text-dim);">🔍</span>
+                <input type="text" id="users-search-input" class="form-control" placeholder="Buscar por nombre, usuario, correo o rol..." oninput="App.onUsersSearch(this.value)">
+              </div>
+
+              <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <label style="font-size: 0.78rem; color: var(--text-dim); font-weight: 700; text-transform: uppercase;">Filtrar Rol:</label>
+                  <select id="users-filter-role" class="form-control" style="width: 210px; font-size: 0.85rem;" onchange="App.filterUsers()">
+                    <option value="all">Todos los Roles</option>
+                    <option value="superadmin">👑 Super Administrador</option>
+                    <option value="admin">⭐ Administrador General</option>
+                    <option value="boveda">💎 Jefe de Bóveda</option>
+                    <option value="comercial">💼 Comercial / Ventas</option>
+                    <option value="cajero">💵 Caja & Facturación</option>
+                    <option value="auditor">⚖️ Auditor NIIF</option>
+                  </select>
+                </div>
+
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <label style="font-size: 0.78rem; color: var(--text-dim); font-weight: 700; text-transform: uppercase;">Estado:</label>
+                  <select id="users-filter-status" class="form-control" style="width: 140px; font-size: 0.85rem;" onchange="App.filterUsers()">
+                    <option value="all">Todos</option>
+                    <option value="activo">🟢 Activos</option>
+                    <option value="inactivo">🔴 Inactivos</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Users Table Card -->
+          <div class="table-card" style="padding: 0; overflow: hidden; margin-bottom: 24px;">
+            <div class="table-responsive">
+              <table class="data-table" id="users-table">
+                <thead>
+                  <tr>
+                    <th style="width: 260px;">Usuario / Personal</th>
+                    <th style="width: 190px;">Rol & Perfil</th>
+                    <th style="width: 210px;">Contacto / Email</th>
+                    <th style="width: 120px;">Estado</th>
+                    <th style="width: 150px;">Último Ingreso</th>
+                    <th style="width: 320px; text-align: center;">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="users-table-body">
+                  <!-- Dynamically populated -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 2: MATRIZ DE PERMISOS POR ROL -->
+        <div id="users-tab-matriz" style="display: none;">
+          <!-- Role selector card -->
+          <div class="table-card" style="padding: 18px 22px; margin-bottom: 20px; border-left: 4px solid var(--gold-primary);">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+              <div>
+                <h3 style="margin: 0; display: flex; align-items: center; gap: 8px;">
+                  <span>Configuración del Rol:</span>
+                  <span id="matrix-active-role-title" style="color: var(--gold-primary);">Super Administrador (Dueño)</span>
+                </h3>
+                <p id="matrix-active-role-desc" style="font-size: 0.8rem; color: var(--text-dim); margin: 4px 0 0 0;">
+                  Control absoluto e irrevocable de todo el sistema, finanzas, bóveda, usuarios y permisos.
+                </p>
+              </div>
+
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <label style="font-size: 0.8rem; font-weight: 700; color: var(--text-dim); text-transform: uppercase;">Seleccionar Rol a Configurar:</label>
+                <select id="matrix-role-selector" class="form-control" style="width: 270px; font-weight: 700;" onchange="App.selectRoleForMatrix(this.value)">
+                  <!-- Options populated dynamically -->
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Quick actions for role permissions -->
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">
+            <div style="font-size: 0.82rem; color: var(--text-muted); display: flex; align-items: center; gap: 6px;">
+              <span>💡 Marca o desmarca las casillas según las facultades de cada cargo mayorista:</span>
+            </div>
+            <div style="display: flex; gap: 8px;" id="matrix-quick-buttons">
+              <button type="button" class="btn btn-secondary btn-xs" onclick="App.toggleAllMatrixColumn('canView', true)">👁️ Ver Todo</button>
+              <button type="button" class="btn btn-secondary btn-xs" onclick="App.toggleAllMatrixColumn('canEdit', true)">✏️ Editar Todo</button>
+              <button type="button" class="btn btn-secondary btn-xs" onclick="App.toggleAllMatrixColumn('canExport', true)">📤 Exportar Todo</button>
+              <button type="button" class="btn btn-outline-danger btn-xs" onclick="App.clearAllMatrixRole()">✕ Desmarcar</button>
+            </div>
+          </div>
+
+          <!-- Matrix Table Card -->
+          <div class="table-card" style="padding: 0; overflow: hidden; margin-bottom: 24px;">
+            <div class="table-responsive">
+              <table class="data-table" id="permissions-matrix-table">
+                <thead>
+                  <tr style="background: rgba(212,175,55,0.06);">
+                    <th style="width: 320px;">Módulo / Sección del Sistema</th>
+                    <th style="width: 140px; text-align: center;">👁️ Puede Ver<br><small style="font-weight: 400; opacity: 0.8;">Acceso visual</small></th>
+                    <th style="width: 160px; text-align: center;">✏️ Puede Modificar<br><small style="font-weight: 400; opacity: 0.8;">Crear / Guardar</small></th>
+                    <th style="width: 140px; text-align: center;">🗑️ Puede Borrar<br><small style="font-weight: 400; opacity: 0.8;">Eliminar ítems</small></th>
+                    <th style="width: 150px; text-align: center;">📤 Puede Exportar<br><small style="font-weight: 400; opacity: 0.8;">PDF / Imprimir</small></th>
+                  </tr>
+                </thead>
+                <tbody id="permissions-matrix-tbody">
+                  <!-- Dynamically populated per module -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Save bar -->
+          <div style="display: flex; justify-content: flex-end; align-items: center; gap: 14px; background: rgba(255,255,255,0.02); padding: 16px 20px; border-radius: var(--radius-md); border: 1px solid rgba(255,255,255,0.08);">
+            <button type="button" class="btn btn-secondary" onclick="App.resetCurrentRolePermissionsToDefault()">
+              🔄 Restaurar Valores por Defecto
+            </button>
+            <button type="button" class="btn btn-gold" id="btn-save-role-permissions" onclick="App.saveRolePermissions()" style="min-width: 240px;">
+              💾 Guardar Cambios de Permisos
+            </button>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- ========================================================= -->
+  <!-- MODALS -->
+  <!-- ========================================================= -->
+
+  <!-- Modal: Ajustar Tasas & Promedios del Día -->
+  <div class="modal-overlay" id="modal-edit-rates">
+    <div class="modal-card" style="max-width: 580px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.3rem;">⚖️</span>
+          <div>
+            <h3 style="margin: 0;">Ajustar Tasas & Promedios del Oro</h3>
+            <p style="font-size: 0.76rem; color: var(--text-dim); margin: 2px 0 0 0;">Modifica los promedios de liquidación del día o restablece el cálculo automático</p>
+          </div>
+        </div>
+        <button class="modal-close" type="button">✕</button>
+      </div>
+      <div class="modal-body">
+        <div style="background: rgba(212,175,55,0.06); border: 1px solid rgba(212,175,55,0.2); border-radius: var(--radius-md); padding: 12px 14px; margin-bottom: 20px; font-size: 0.8rem; color: var(--text-muted); line-height: 1.4;">
+          💡 <strong style="color: var(--gold-light);">Valores en tiempo real:</strong> Estos precios alimentan la balanza digital, el costeo de salidas, las remisiones y la valoración de la bóveda.
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" style="color: var(--gold-light); display: flex; justify-content: space-between;">
+            <span>👑 Oro Puro 24K (Granalla / Fino $/g):</span>
+            <span id="rate-hint-puro" style="font-size: 0.72rem; text-transform: none; color: var(--text-dim);"></span>
+          </label>
+          <div style="position: relative;">
+            <input type="number" step="100" id="rate-input-puro" class="form-control mono" placeholder="ej. 405000" style="font-size: 1.05rem; font-weight: 700; color: #fbe38e; padding-left: 32px;">
+            <span style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); font-weight: 700; color: var(--gold-primary);">$</span>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" style="color: #fbbf24; display: flex; justify-content: space-between;">
+              <span>🇨🇴 Nacional 18K ($/g):</span>
+              <span id="rate-hint-nc" style="font-size: 0.72rem; text-transform: none; color: var(--text-dim);"></span>
+            </label>
+            <div style="position: relative;">
+              <input type="number" step="100" id="rate-input-nc" class="form-control mono" placeholder="ej. 259500" style="font-size: 1.05rem; font-weight: 700; color: #fbbf24; padding-left: 32px;">
+              <span style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); font-weight: 700; color: #fbbf24;">$</span>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" style="color: #34d399; display: flex; justify-content: space-between;">
+              <span>🇮🇹 Italiano 18K ($/g):</span>
+              <span id="rate-hint-it" style="font-size: 0.72rem; text-transform: none; color: var(--text-dim);"></span>
+            </label>
+            <div style="position: relative;">
+              <input type="number" step="100" id="rate-input-it" class="form-control mono" placeholder="ej. 283800" style="font-size: 1.05rem; font-weight: 700; color: #34d399; padding-left: 32px;">
+              <span style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); font-weight: 700; color: #34d399;">$</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 0;">
+          <label class="form-label" style="color: #f87171; display: flex; justify-content: space-between;">
+            <span>♻️ Tasa Compra Retal 18K ($/g):</span>
+            <span style="font-size: 0.72rem; text-transform: none; color: var(--text-dim);">Tasa de recibo en despachos</span>
+          </label>
+          <div style="position: relative;">
+            <input type="number" step="100" id="rate-input-retal" class="form-control mono" placeholder="ej. 255000" style="font-size: 1.05rem; font-weight: 700; color: #f87171; padding-left: 32px;">
+            <span style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); font-weight: 700; color: #f87171;">$</span>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+        <button class="btn btn-secondary btn-sm" type="button" onclick="App.resetAutoRates()" title="Vuelve a calcular los promedios a partir de las compras y gramaje en bóveda">
+          🔄 Cálculo Automático
+        </button>
+        <div style="display: flex; gap: 10px;">
+          <button class="btn btn-secondary modal-cancel" type="button">Cancelar</button>
+          <button class="btn btn-gold" type="button" onclick="App.submitRates()">Guardar Tasas</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Comprar Oro Puro 24K (Granalla) -->
+  <div class="modal-overlay" id="modal-compra-puro">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Registrar Compra de Oro Puro 24K</h3>
+        <button class="modal-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 16px;">
+          Ingresa la compra de granalla o lingotes 24K para actualizar el costo promedio ponderado de puro en bóveda.
+        </p>
+        <div class="form-group">
+          <label class="form-label">Proveedor / Fundición:</label>
+          <div style="display: flex; gap: 8px;">
+            <select id="compra-puro-supplier-select" class="form-control"></select>
+            <button class="btn btn-outline-gold btn-sm" type="button" style="white-space: nowrap;" onclick="App.openNewProveedorModal()">+ Añadir</button>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Peso Comprado (Gramos 24K):</label>
+            <input type="number" step="0.01" min="0.01" id="compra-puro-grams" class="form-control mono" placeholder="ej. 100.00">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Costo por Gramo ($/g):</label>
+            <input type="number" id="compra-puro-cost" class="form-control mono" placeholder="ej. 405000">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">N° Factura / Referencia:</label>
+            <input type="text" id="compra-puro-ref" class="form-control" placeholder="ej. FAC-1002">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Notas:</label>
+            <input type="text" id="compra-puro-notes" class="form-control" placeholder="Granalla 999.9">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary modal-cancel">Cancelar</button>
+        <button class="btn btn-gold" onclick="App.submitCompraPuro()">Guardar Compra de Puro</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Entregar Oro Puro 24K a Taller -->
+  <div class="modal-overlay" id="modal-entrega-puro">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Entregar Oro Puro 24K a Taller / Proveedor</h3>
+        <button class="modal-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="entrega-puro-stock-hint" style="padding: 10px; background: rgba(212, 175, 55, 0.1); border-radius: 8px; margin-bottom: 16px; font-weight: 700; color: var(--gold-light);">
+          Puro en bóveda: 0.00g
+        </div>
+        <div class="form-group">
+          <label class="form-label">Taller o Proveedor Destinatario:</label>
+          <div style="display: flex; gap: 8px;">
+            <select id="entrega-puro-supplier-select" class="form-control"></select>
+            <button class="btn btn-outline-gold btn-sm" type="button" style="white-space: nowrap;" onclick="App.openNewProveedorModal()">+ Añadir</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Gramos de Oro Puro 24K a Entregar:</label>
+          <input type="number" step="0.01" min="0.01" id="entrega-puro-grams" class="form-control mono" placeholder="ej. 50.00" style="font-size: 1.15rem; font-weight: 800; color: #fbe38e;">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Observaciones / Motivo de Entrega:</label>
+          <input type="text" id="entrega-puro-notes" class="form-control" placeholder="ej. Para fundir cubanas y anillos 18K">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary modal-cancel">Cancelar</button>
+        <button class="btn btn-gold" onclick="App.submitEntregaPuro()">Confirmar Entrega de Puro</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Recibir Joyería de Taller (Cargando Mano de Obra) -->
+  <div class="modal-overlay" id="modal-recep-taller">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Recibir Joyería Terminada de Taller</h3>
+        <button class="modal-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">Taller / Proveedor:</label>
+          <div style="display: flex; gap: 8px;">
+            <select id="recep-supplier-select" class="form-control"></select>
+            <button class="btn btn-outline-gold btn-sm" type="button" style="white-space: nowrap;" onclick="App.openNewProveedorModal()">+ Añadir</button>
+          </div>
+          <div id="recep-puro-available-hint" style="font-size: 0.75rem; color: #fbbf24; margin-top: 4px;"></div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Peso 18K Recibido (Gramos):</label>
+            <input type="number" step="0.01" min="0.01" id="recep-grams-18k" class="form-control mono" placeholder="ej. 65.40" style="font-weight: 800; color: #fbe38e;">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Puro 24K Consumido del Taller (g):</label>
+            <input type="number" step="0.01" min="0" id="recep-puro-used" class="form-control mono" placeholder="ej. 49.00">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Categoría:</label>
+            <select id="recep-category" class="form-control">
+              <option value="nacional">🇨🇴 Oro 18K Nacional</option>
+              <option value="italiano">🇮🇹 Oro 18K Italiano (750)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Mano de Obra por Gramo ($/g):</label>
+            <input type="number" id="recep-mo-rate" class="form-control mono" placeholder="ej. 22000">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Subcategoría:</label>
+            <select id="recep-subcategory" class="form-control">
+              <option value="Cadenas">Cadenas</option>
+              <option value="Pulseras">Pulseras</option>
+              <option value="Anillos">Anillos & Sellos</option>
+              <option value="Dijes">Dijes</option>
+              <option value="Aretes">Aretes & Candongas</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Descripción del Lote:</label>
+            <input type="text" id="recep-name" class="form-control" placeholder="ej. Pulseras Cubanas Broche Cajón">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary modal-cancel">Cancelar</button>
+        <button class="btn btn-gold" onclick="App.submitRecepcionTaller()">Ingresar a Bóveda & Cargar M.O</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Nuevo Lote en Bóveda (SIN PIEZAS Y SIN PRECIO DE VENTA FIJO) -->
+  <div class="modal-overlay" id="modal-new-item">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Ingreso de Lote de Oro a Bóveda</h3>
+        <button class="modal-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <form id="form-new-item">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Código / Referencia:</label>
+              <input type="text" id="item-code-input" class="form-control mono" placeholder="ej. CAD-NC-108">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Categoría:</label>
+              <select id="item-cat-input" class="form-control">
+                <option value="nacional">🇨🇴 Joyería Nacional (Oro 18K)</option>
+                <option value="italiano">🇮🇹 Joyería Italiana (Oro 18K / 750)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Descripción & Tejido:</label>
+            <input type="text" id="item-name-input" class="form-control" placeholder="ej. Cadena Cubana Maciza Diamantada 18K">
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Subcategoría:</label>
+              <select id="item-subcat-input" class="form-control">
+                <option value="Cadenas">Cadenas</option>
+                <option value="Pulseras">Pulseras & Manillas</option>
+                <option value="Anillos">Anillos & Sellos</option>
+                <option value="Dijes">Dijes & Medallas</option>
+                <option value="Aretes">Candongas & Aretes</option>
+                <option value="Gargantillas">Gargantillas</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Origen / Fabricante:</label>
+              <input type="text" id="item-origin-input" class="form-control" placeholder="ej. Bucaramanga / Arezzo">
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Peso Total del Lote (Gramos Netos):</label>
+              <input type="number" step="0.01" min="0.01" id="item-weight-input" class="form-control mono" placeholder="ej. 85.40" style="font-weight: 800; color: #fbe38e;">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Costo Base por Gramo ($/g):</label>
+              <input type="number" id="item-cost-input" class="form-control mono" placeholder="ej. 259500">
+            </div>
+          </div>
+
+          <p style="font-size: 0.75rem; color: var(--text-dim); margin-top: 6px;">
+            * Nota: El precio de venta mayorista no se predetermina; se pacta en caliente con el cliente al momento de pesar y despachar.
+          </p>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary modal-cancel">Cancelar</button>
+        <button class="btn btn-gold" onclick="App.submitNewItem()">Guardar Lote en Bóveda</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Gestión de Categorías de Bóveda (Añadir, Editar, Eliminar) -->
+  <div class="modal-overlay" id="modal-manage-categories">
+    <div class="modal-card" style="max-width: 760px; max-height: 90vh; display: flex; flex-direction: column;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.4rem;">🏷️</span>
+          <div>
+            <h3 style="margin: 0;">Gestión de Categorías de Bóveda</h3>
+            <p style="font-size: 0.75rem; color: var(--text-dim); margin: 2px 0 0 0;">
+              Añade, edita o elimina categorías para clasificar y filtrar los lotes de oro por procedencia o hechura
+            </p>
+          </div>
+        </div>
+        <button class="modal-close">✕</button>
+      </div>
+
+      <div class="modal-body" style="overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 20px;">
+        
+        <!-- Categorías Activas -->
+        <div>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <h4 style="font-size: 0.95rem; color: var(--text-headings); margin: 0; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">
+              Categorías Activas en Bóveda
+            </h4>
+            <span id="cat-total-counter" style="font-size: 0.8rem; color: var(--gold-light); font-weight: 700;"></span>
+          </div>
+          <div id="categories-list-container" style="display: flex; flex-direction: column; gap: 10px;">
+            <!-- Populated dynamically by App.renderCategoriesList() -->
+          </div>
+        </div>
+
+        <!-- Formulario: Añadir o Editar Categoría -->
+        <div class="table-card" style="padding: 18px; border: 1px solid rgba(212, 175, 55, 0.3); background: rgba(20, 24, 33, 0.8);">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+            <h4 id="cat-form-title" style="margin: 0; font-size: 0.98rem; color: var(--gold-primary); font-weight: 800;">
+              ➕ Añadir Nueva Categoría
+            </h4>
+            <button type="button" id="btn-cancel-edit-cat" class="btn btn-secondary btn-sm" onclick="App.resetCategoryForm()" style="display: none; padding: 4px 10px; font-size: 0.75rem;">
+              ✕ Cancelar Edición
+            </button>
+          </div>
+
+          <form id="form-category" onsubmit="event.preventDefault(); App.submitCategoryForm();">
+            <input type="hidden" id="cat-edit-id" value="">
+
+            <div class="form-row">
+              <div class="form-group" style="flex: 1.4;">
+                <label class="form-label">Nombre Completo de la Categoría *</label>
+                <input type="text" id="cat-name-input" class="form-control" placeholder="ej. Oro Turco 18K (750)" required oninput="App.onCategoryInputPreview()">
+              </div>
+              <div class="form-group" style="flex: 1;">
+                <label class="form-label">Distintivo Corto / Badge (con Emoji) *</label>
+                <input type="text" id="cat-badge-input" class="form-control" placeholder="ej. 🇹🇷 Turco 18K" required oninput="App.onCategoryInputPreview()">
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group" style="flex: 1.2;">
+                <label class="form-label">Color Distintivo:</label>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <input type="color" id="cat-color-picker" value="#d4af37" style="width: 44px; height: 38px; padding: 2px; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; background: transparent; cursor: pointer;" oninput="App.onCategoryColorChange(this.value)">
+                  <div style="display: flex; gap: 6px; flex-wrap: wrap;" id="cat-color-presets">
+                    <!-- Populated by App -->
+                  </div>
+                </div>
+              </div>
+              <div class="form-group" style="flex: 1;">
+                <label class="form-label">Slug / Código Interno:</label>
+                <input type="text" id="cat-slug-input" class="form-control mono" placeholder="ej. turco (auto si se deja vacío)">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Descripción u Origen (Opcional):</label>
+              <input type="text" id="cat-desc-input" class="form-control" placeholder="ej. Joyería importada de Turquía con eslabones huecos de alto volumen">
+            </div>
+
+            <!-- Vista Previa de la Etiqueta -->
+            <div class="modal-preview-bar">
+              <span style="font-size: 0.75rem; color: var(--text-dim); text-transform: uppercase; font-weight: 700;">Vista Previa en Tarjeta:</span>
+              <div id="cat-preview-badge-container">
+                <span id="cat-preview-badge" class="ticker-badge" style="color: #d4af37; border-color: rgba(212,175,55,0.4); background: rgba(212,175,55,0.15); font-size: 0.75rem; padding: 3px 8px; border-radius: 9999px;">
+                  🏷️ Nueva Categoría
+                </span>
+              </div>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px;">
+              <button type="submit" class="btn btn-gold" id="btn-submit-cat" style="min-width: 180px;">
+                💾 Guardar Categoría
+              </button>
+            </div>
+          </form>
+        </div>
+
+      </div>
+
+      <div class="modal-footer" style="padding: 14px 20px;">
+        <button class="btn btn-secondary modal-cancel">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Registrar Abono (CxC o CxP con soporte de Retal) -->
+  <div class="modal-overlay" id="modal-abono">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="abono-entity-title">Registrar Abono</h3>
+        <button class="modal-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="abono-type">
+        <input type="hidden" id="abono-entity-id">
+
+        <div id="abono-current-debt-display" style="padding: 12px; background: rgba(255,255,255,0.04); border-radius: 8px; margin-bottom: 20px; font-weight: 700; color: #f87171;">
+          Saldo pendiente actual: $0
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Monto Abonado en Dinero ($):</label>
+          <input type="number" id="abono-cash-amount" class="form-control mono" placeholder="$ 0" oninput="App.recalcAbonoTotal()">
+        </div>
+
+        <!-- Scrap Gold / Retal payment input -->
+        <div style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: var(--radius-md); padding: 16px; margin-bottom: 18px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <span style="font-size: 0.8rem; font-weight: 700; color: #f87171;">♻️ Recibir Pago en Retal / Oro 18K:</span>
+            <span class="mono" style="font-size: 0.85rem; font-weight: 800; color: #f87171;" id="abono-scrap-val-calc">+$0</span>
+          </div>
+          <div class="form-row">
+            <div>
+              <label style="font-size: 0.72rem; color: var(--text-muted); display: block;">Peso Retal (Gramos):</label>
+              <input type="number" step="0.01" min="0" id="abono-scrap-grams" class="form-control mono" placeholder="0.00 g" style="padding: 10px 8px; font-size: 0.88rem;" oninput="App.recalcAbonoTotal()">
+            </div>
+            <div>
+              <label style="font-size: 0.72rem; color: var(--text-muted); display: block;">Mano de Obra /g:</label>
+              <input type="number" id="abono-scrap-rate" class="form-control mono" style="padding: 10px 8px; font-size: 0.88rem;" oninput="App.recalcAbonoTotal()">
+            </div>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Medio de Pago:</label>
+            <select id="abono-method-select" class="form-control">
+              <option value="Efectivo">Efectivo en Caja</option>
+              <option value="Transferencia Bancolombia">Transferencia Bancolombia</option>
+              <option value="Transferencia Davivienda">Transferencia Davivienda</option>
+              <option value="Retal de Oro 18K">Retal de Oro 18K</option>
+              <option value="Mixto">Mixto (Efectivo + Oro)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">N° de Comprobante / Ref:</label>
+            <input type="text" id="abono-reference" class="form-control" placeholder="ej. TR-99841">
+          </div>
+        </div>
+
+        <div class="abono-total-banner">
+          <span style="font-weight: 700; color: var(--text-muted);">TOTAL ABONADO / DEDUCIDO:</span>
+          <span class="mono" style="font-size: 1.3rem; font-weight: 800; color: #34d399;" id="abono-total-credited-calc">$0</span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary modal-cancel">Cancelar</button>
+        <button class="btn btn-gold" onclick="App.submitAbono()">Registrar Abono</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Registrar / Editar Joyería Mayorista -->
+  <div class="modal-overlay" id="modal-new-client">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="modal-client-title">Registrar Cliente o Joyería Mayorista</h3>
+        <button class="modal-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="newcli-id">
+        <div class="form-group">
+          <label class="form-label">Razón Social o Nombre Comercial:</label>
+          <input type="text" id="newcli-trade" class="form-control" placeholder="ej. Joyería Oro & Plata Real S.A.S">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Nombre del Titular:</label>
+            <input type="text" id="newcli-name" class="form-control" placeholder="ej. Andrés Felipe Castro">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Tipo & Documento:</label>
+            <div style="display: flex; gap: 6px;">
+              <select id="newcli-doctype" class="form-control" style="width: 90px;">
+                <option value="NIT">NIT</option>
+                <option value="CC">CC</option>
+              </select>
+              <input type="text" id="newcli-doc" class="form-control mono" placeholder="900.123.456-1">
+            </div>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Teléfono / WhatsApp:</label>
+            <input type="text" id="newcli-phone" class="form-control" placeholder="+57 310 123 4567">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Ciudad / Departamento:</label>
+            <input type="text" id="newcli-city" class="form-control" placeholder="ej. Medellín, Antioquia">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Cupo de Crédito en Dinero ($):</label>
+            <input type="number" id="newcli-limit-pesos" class="form-control mono" value="50000000">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Calificación / Nivel de Riesgo:</label>
+            <select id="newcli-risk" class="form-control">
+              <option value="A - Excelente">A - Excelente (Pago puntual)</option>
+              <option value="B - Normal">B - Normal (15 a 30 días)</option>
+              <option value="C - Observación">C - En Observación</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary modal-cancel">Cancelar</button>
+        <button class="btn btn-gold" onclick="App.submitJoyeriaForm()">Guardar Joyería</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Registrar / Editar Proveedor o Taller -->
+  <div class="modal-overlay" id="modal-new-supplier">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="modal-supplier-title">Registrar Proveedor o Taller de Fundición</h3>
+        <button class="modal-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="newsup-id">
+        <div class="form-group">
+          <label class="form-label">Nombre del Proveedor o Taller:</label>
+          <input type="text" id="newsup-name" class="form-control" placeholder="ej. Taller & Vaciado El Sol 18K">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Categoría:</label>
+            <select id="newsup-cat" class="form-control">
+              <option value="Taller Nacional / Vaciado">Taller Nacional / Vaciado</option>
+              <option value="Importador Italiano">Importador Italiano</option>
+              <option value="Fundición & Granalla 24K">Fundición & Granalla 24K</option>
+              <option value="Orfebre Particular">Orfebre Particular</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Mano de Obra por Gramo ($/g):</label>
+            <input type="number" id="newsup-mo" class="form-control mono" placeholder="ej. 22000">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Contacto / Representante:</label>
+            <input type="text" id="newsup-contact" class="form-control" placeholder="ej. Maestro Germán Gómez">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Teléfono / WhatsApp:</label>
+            <input type="text" id="newsup-phone" class="form-control" placeholder="+57 320 000 0000">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Ciudad / Sede:</label>
+          <input type="text" id="newsup-city" class="form-control" placeholder="ej. Bucaramanga / Bogotá">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary modal-cancel">Cancelar</button>
+        <button class="btn btn-gold" onclick="App.submitProveedorForm()">Guardar Proveedor</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Registrar / Editar Método de Pago -->
+  <div class="modal-overlay" id="modal-payment-method">
+    <div class="modal-card" style="max-width: 650px;">
+      <div class="modal-header">
+        <h3 id="modal-pm-title">Registrar Nuevo Método de Pago</h3>
+        <button class="modal-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="pm-id">
+
+        <div class="form-row">
+          <div class="form-group" style="flex: 2;">
+            <label class="form-label">Nombre del Método de Pago / Alias:</label>
+            <input type="text" id="pm-name" class="form-control" placeholder="ej. Bancolombia Cuenta Corriente - Nexus">
+          </div>
+          <div class="form-group" style="flex: 1.2;">
+            <label class="form-label">Tipo de Método:</label>
+            <select id="pm-type" class="form-control" onchange="App.onPaymentTypeChange()">
+              <option value="Transferencia">🏦 Transferencia Bancaria</option>
+              <option value="Efectivo">💵 Efectivo / Caja</option>
+              <option value="Credito">⏳ Crédito Mayorista</option>
+              <option value="Retal Oro">♻️ Retal de Oro 18K</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Section: Transferencia Bancaria -->
+        <div id="pm-section-transferencia" class="pm-dynamic-section">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Banco / Entidad Financiera:</label>
+              <select id="pm-bank" class="form-control">
+                <option value="Bancolombia">Bancolombia</option>
+                <option value="Davivienda">Davivienda</option>
+                <option value="Banco de Bogotá">Banco de Bogotá</option>
+                <option value="BBVA Colombia">BBVA Colombia</option>
+                <option value="Banco de Occidente">Banco de Occidente</option>
+                <option value="Nequi">Nequi</option>
+                <option value="Daviplata">Daviplata</option>
+                <option value="Otro">Otro Banco / Entidad</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Tipo de Cuenta:</label>
+              <select id="pm-account-type" class="form-control">
+                <option value="Corriente">Cuenta Corriente</option>
+                <option value="Ahorros">Cuenta de Ahorros</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Número de Cuenta:</label>
+              <input type="text" id="pm-account-num" class="form-control mono" placeholder="ej. 458-99214-01">
+            </div>
+            <div class="form-group">
+              <label class="form-label">NIT o Cédula del Titular:</label>
+              <input type="text" id="pm-doc" class="form-control mono" placeholder="ej. 901.884.221-9">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Nombre del Titular de la Cuenta:</label>
+            <input type="text" id="pm-holder" class="form-control" placeholder="ej. Nexus Joyas Mayoristas S.A.S">
+          </div>
+        </div>
+
+        <!-- Section: Crédito Mayorista -->
+        <div id="pm-section-credito" class="pm-dynamic-section" style="display: none;">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Días de Plazo Calendario:</label>
+              <select id="pm-credit-days" class="form-control mono">
+                <option value="8">8 Días de Plazo</option>
+                <option value="15" selected>15 Días de Plazo</option>
+                <option value="30">30 Días de Plazo</option>
+                <option value="45">45 Días de Plazo</option>
+                <option value="60">60 Días de Plazo</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Recargo / Interés Pactado (% mensual):</label>
+              <input type="number" step="0.1" min="0" id="pm-surcharge" class="form-control mono" placeholder="0%" value="0">
+            </div>
+          </div>
+          <p style="font-size: 0.75rem; color: var(--text-dim); margin-top: 4px;">
+            * El crédito mayorista se valida automáticamente contra el cupo asignado a la joyería en su ficha comercial.
+          </p>
+        </div>
+
+        <!-- Section: Efectivo / Caja -->
+        <div id="pm-section-efectivo" class="pm-dynamic-section" style="display: none;">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Caja / Sede Responsable:</label>
+              <input type="text" id="pm-cash-loc" class="form-control" placeholder="ej. Caja Principal - Bóveda Central">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Moneda de Recaudo:</label>
+              <select id="pm-cash-curr" class="form-control">
+                <option value="COP">COP ($ Pesos Colombianos)</option>
+                <option value="USD">USD ($ Dólares Americanos)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section: Retal de Oro 18K -->
+        <div id="pm-section-retal" class="pm-dynamic-section" style="display: none;">
+          <div style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 12px;">
+            <div style="font-weight: 700; color: #f87171; font-size: 0.82rem; margin-bottom: 4px;">
+              ♻️ Pago en Metal Físico (Cruces de Oro)
+            </div>
+            <div style="font-size: 0.78rem; color: var(--text-muted);">
+              Permite a los clientes mayoristas saldar total o parcialmente sus facturas entregando retal de oro 18K (Ley 750) que ingresa a bóveda para fundición.
+            </div>
+          </div>
+        </div>
+
+        <!-- Instructions & Settings -->
+        <div class="form-group">
+          <label class="form-label">Instrucciones para el Cliente / Soporte:</label>
+          <textarea id="pm-instructions" class="form-control" rows="2" placeholder="ej. Enviar comprobante de transferencia al WhatsApp de despacho..."></textarea>
+        </div>
+
+        <div class="pm-checkbox-panel">
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.85rem; color: var(--text-main);">
+            <input type="checkbox" id="pm-is-active" checked style="accent-color: var(--gold-primary); width: 16px; height: 16px;">
+            Método Activo
+          </label>
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.85rem; color: var(--text-main);">
+            <input type="checkbox" id="pm-is-default" style="accent-color: var(--gold-primary); width: 16px; height: 16px;">
+            Marcar como Predeterminado
+          </label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary modal-cancel">Cancelar</button>
+        <button class="btn btn-gold" onclick="App.submitPaymentMethodForm()">Guardar Método de Pago</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Registrar Movimiento de Caja / Gasto -->
+  <div class="modal-overlay" id="modal-cash-movement">
+    <div class="modal-card" style="max-width: 580px;">
+      <div class="modal-header">
+        <h3 id="modal-mov-title">Registrar Movimiento de Caja</h3>
+        <button class="modal-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Tipo de Flujo:</label>
+            <select id="mov-type" class="form-control" onchange="App.onMovTypeChange()">
+              <option value="egreso">🔴 Salida / Egreso (Gasto o Pago)</option>
+              <option value="ingreso">🟢 Entrada / Ingreso Extraordinario</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Categoría:</label>
+            <select id="mov-category" class="form-control">
+              <option value="Gasto Operativo">Gasto Operativo General</option>
+              <option value="Seguridad & Transporte Valores">Seguridad & Transporte de Valores</option>
+              <option value="Arriendo & Sede">Arriendo & Sede Bóveda</option>
+              <option value="Suministros Taller">Suministros & Herramientas Taller</option>
+              <option value="Nómina & Honorarios">Nómina & Honorarios</option>
+              <option value="Inyección de Capital">Inyección de Capital / Caja</option>
+              <option value="Retiro de Utilidades">Retiro de Utilidades / Socios</option>
+              <option value="Otro">Otro Concepto</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Concepto / Motivo Detallado:</label>
+          <input type="text" id="mov-concept" class="form-control" placeholder="ej. Flete de remesa blindada de joyería sede centro">
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Monto en Dinero ($):</label>
+            <input type="number" id="mov-amount" class="form-control mono" placeholder="$ 0" style="font-weight: 800; color: var(--text-headings);">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Medio de Pago / Cuenta Afectada:</label>
+            <select id="mov-method" class="form-control"></select>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">N° de Recibo / Comprobante / Factura:</label>
+            <input type="text" id="mov-ref" class="form-control" placeholder="ej. FAC-8891 o REC-01">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Fecha del Movimiento:</label>
+            <input type="date" id="mov-date" class="form-control mono">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Notas u Observaciones Adicionales:</label>
+          <textarea id="mov-notes" class="form-control" rows="2" placeholder="Observaciones contables para el cuadre..."></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary modal-cancel">Cancelar</button>
+        <button class="btn btn-gold" onclick="App.submitCashMovementForm()">Guardar Movimiento</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Arqueo / Cuadre de Caja Imprimible Oficial -->
+  <div class="modal-overlay" id="modal-print-cuadre">
+    <div class="modal-card" style="max-width: 860px;">
+      <div class="modal-header no-print">
+        <h3>Comprobante Oficial de Cuadre de Caja & Arqueo</h3>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn btn-gold btn-sm" onclick="window.print()">🖨️ Imprimir Acta de Cuadre</button>
+          <button class="modal-close">✕</button>
+        </div>
+      </div>
+      <div class="modal-body" id="cuadre-print-content" style="padding: 10px;">
+        <!-- Populated dynamically -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Remisión Imprimible Oficial -->
+  <div class="modal-overlay" id="modal-remision">
+    <div class="modal-card" style="max-width: 820px;">
+      <div class="modal-header no-print">
+        <h3>Remisión Mayorista Oficial</h3>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn btn-gold btn-sm" onclick="window.print()">🖨️ Imprimir Remisión</button>
+          <button class="modal-close">✕</button>
+        </div>
+      </div>
+      <div class="modal-body" id="remision-print-content" style="padding: 10px;">
+        <!-- Populated dynamically -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Expediente Detallado de Cartera de Cliente -->
+  <div class="modal-overlay" id="modal-client-cartera-detail">
+    <div class="modal-card" style="max-width: 980px; width: 95vw;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.4rem;">👤</span>
+          <div>
+            <h3 id="mccd-client-name" style="margin: 0; font-size: 1.25rem; color: var(--gold-light);">Expediente de Cartera del Cliente</h3>
+            <span id="mccd-client-doc" style="font-size: 0.8rem; color: var(--text-muted);">NIT / CC • Ciudad</span>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <button class="btn btn-outline-gold btn-sm" id="mccd-btn-print" onclick="App.openStatementFromDetail()">
+            🖨️ Estado de Cuenta
+          </button>
+          <button class="modal-close">✕</button>
+        </div>
+      </div>
+      <div class="modal-body" style="padding: 20px;">
+        <!-- Client Financial Header Summary -->
+        <div id="mccd-kpis-container" class="client-detail-kpi-grid">
+          <!-- Populated dynamically -->
+        </div>
+
+        <!-- Detail Sub-Navigation Tabs -->
+        <div class="client-detail-tabs">
+          <button class="cd-tab active" data-tab="ledger" onclick="App.switchClientDetailTab('ledger')">
+            📑 Libro Mayor / Ledger Completo
+          </button>
+          <button class="cd-tab" data-tab="remisiones" onclick="App.switchClientDetailTab('remisiones')">
+            📦 Despachos a Crédito (<span id="mccd-badge-remisiones">0</span>)
+          </button>
+          <button class="cd-tab" data-tab="abonos" onclick="App.switchClientDetailTab('abonos')">
+            💰 Abonos & Retal Oro (<span id="mccd-badge-abonos">0</span>)
+          </button>
+        </div>
+
+        <!-- Tab 1: Ledger -->
+        <div id="cd-tab-content-ledger" class="cd-tab-pane active">
+          <div class="table-responsive" style="max-height: 380px; overflow-y: auto;">
+            <table class="lux-table">
+              <thead>
+                <tr>
+                  <th>Fecha & Hora</th>
+                  <th>Comprobante</th>
+                  <th>Concepto / Detalle</th>
+                  <th>Tipo</th>
+                  <th class="text-right">Gramos Oro</th>
+                  <th class="text-right">Débito (+)</th>
+                  <th class="text-right">Crédito (-)</th>
+                  <th class="text-right">Saldo Deuda ($)</th>
+                </tr>
+              </thead>
+              <tbody id="mccd-ledger-tbody">
+                <!-- Populated dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Tab 2: Remisiones -->
+        <div id="cd-tab-content-remisiones" class="cd-tab-pane" style="display: none;">
+          <div class="table-responsive" style="max-height: 380px; overflow-y: auto;">
+            <table class="lux-table">
+              <thead>
+                <tr>
+                  <th>Nº Remisión</th>
+                  <th>Fecha</th>
+                  <th class="text-right">Peso Oro (g)</th>
+                  <th class="text-right">Valor Total ($)</th>
+                  <th class="text-right">Pagado Contado</th>
+                  <th class="text-right">Financiado a Crédito</th>
+                  <th>Estado</th>
+                  <th class="text-center">Ver</th>
+                </tr>
+              </thead>
+              <tbody id="mccd-remisiones-tbody">
+                <!-- Populated dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Tab 3: Abonos -->
+        <div id="cd-tab-content-abonos" class="cd-tab-pane" style="display: none;">
+          <div class="table-responsive" style="max-height: 380px; overflow-y: auto;">
+            <table class="lux-table">
+              <thead>
+                <tr>
+                  <th>Comprobante</th>
+                  <th>Fecha</th>
+                  <th>Método de Pago</th>
+                  <th class="text-right">Retal 18K (g)</th>
+                  <th class="text-right">Tasa Retal ($/g)</th>
+                  <th class="text-right">Total Acreditado ($)</th>
+                  <th>Notas / Referencia</th>
+                </tr>
+              </thead>
+              <tbody id="mccd-abonos-tbody">
+                <!-- Populated dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="justify-content: space-between;">
+        <div style="display: flex; gap: 8px;">
+          <button class="btn btn-secondary modal-cancel">Cerrar</button>
+        </div>
+        <div style="display: flex; gap: 10px;">
+          <button class="btn btn-outline-gold" id="mccd-btn-whatsapp" onclick="App.openClientWhatsAppFromDetail()">
+            💬 Enviar Estado por WhatsApp
+          </button>
+          <button class="btn btn-gold" id="mccd-btn-abonar" onclick="App.openAbonoFromDetail()">
+            + Registrar Abono
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Estado de Cuenta Oficial Imprimible -->
+  <div class="modal-overlay" id="modal-statement-print">
+    <div class="modal-card" style="max-width: 860px;">
+      <div class="modal-header no-print">
+        <h3>Estado de Cuenta Mayorista Oficial</h3>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn btn-gold btn-sm" onclick="window.print()">🖨️ Imprimir Estado de Cuenta</button>
+          <button class="modal-close">✕</button>
+        </div>
+      </div>
+      <div class="modal-body" id="statement-print-content" style="padding: 10px;">
+        <!-- Populated dynamically -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Balance General Imprimible Oficial (Certificado Contable) -->
+  <div class="modal-overlay" id="modal-print-balance">
+    <div class="modal-card" style="max-width: 900px;">
+      <div class="modal-header no-print">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.3rem;">⚖️</span>
+          <div>
+            <h3 style="margin: 0;">Certificado Oficial de Balance General</h3>
+            <p style="font-size: 0.74rem; color: var(--text-dim); margin: 2px 0 0 0;">Documento formal para auditoría contable, bancos y junta directiva</p>
+          </div>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn btn-gold btn-sm" onclick="window.print()">🖨️ Imprimir Acta</button>
+          <button class="modal-close">✕</button>
+        </div>
+      </div>
+      <div class="modal-body" id="balance-print-content" style="padding: 10px;">
+        <!-- Populated dynamically -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Registrar / Editar Gasto Operativo -->
+  <div class="modal-overlay" id="modal-gasto-operativo">
+    <div class="modal-card" style="max-width: 640px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.3rem;">📋</span>
+          <div>
+            <h3 id="modal-gasto-title" style="margin: 0;">Registrar Nuevo Gasto Operativo</h3>
+            <p style="font-size: 0.74rem; color: var(--text-dim); margin: 2px 0 0 0;">Costo fijo, servicios, nómina, blindaje o mantenimiento mayorista</p>
+          </div>
+        </div>
+        <button class="modal-close">✕</button>
+      </div>
+
+      <div class="modal-body" style="padding: 20px;">
+        <form id="form-gasto-operativo" onsubmit="event.preventDefault(); App.submitGastoForm();">
+          <input type="hidden" id="gasto-id" value="">
+
+          <div class="form-row">
+            <div class="form-group" style="flex: 1;">
+              <label class="form-label">Fecha del Egreso *</label>
+              <input type="date" id="gasto-date" class="form-control mono" required>
+            </div>
+            <div class="form-group" style="flex: 1.5;">
+              <label class="form-label">Categoría Operativa *</label>
+              <select id="gasto-category" class="form-control" required>
+                <option value="Nómina & Comisiones Mayoristas">👥 Nómina & Comisiones Mayoristas</option>
+                <option value="Seguridad, Blindaje & Transporte">🛡️ Seguridad, Blindaje & Transporte</option>
+                <option value="Arrendamiento & Mantenimiento Bóveda">🏢 Arrendamiento & Mantenimiento Bóveda</option>
+                <option value="Pólizas de Seguro de Metales">📜 Pólizas de Seguro de Metales</option>
+                <option value="Suministros de Bóveda & Empaque">📦 Suministros de Bóveda & Empaque</option>
+                <option value="Servicios Públicos & Conectividad">⚡ Servicios Públicos & Conectividad</option>
+                <option value="Gastos Bancarios & 4x1000">🏦 Gastos Bancarios & 4x1000</option>
+                <option value="Honorarios Legales & Auditoría">⚖️ Honorarios Legales & Auditoría</option>
+                <option value="Viáticos & Giras Comerciales">✈️ Viáticos & Giras Comerciales</option>
+                <option value="Gastos Varios & Caja Menor" selected>☕ Gastos Varios & Caja Menor</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Concepto / Detalle del Gasto *</label>
+            <input type="text" id="gasto-concept" class="form-control" placeholder="ej. Pago mensual de canon de arrendamiento bóveda de seguridad" required>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group" style="flex: 1.2;">
+              <label class="form-label">Monto del Egreso (COP $) *</label>
+              <input type="number" id="gasto-amount" class="form-control mono" placeholder="$ 0" required min="1" step="1" style="font-weight: 800; font-size: 1.1rem; color: #f87171;">
+            </div>
+            <div class="form-group" style="flex: 1.3;">
+              <label class="form-label">Medio de Pago / Cuenta *</label>
+              <select id="gasto-method" class="form-control" required>
+                <!-- Populated dynamically from paymentMethods -->
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group" style="flex: 1.2;">
+              <label class="form-label">Beneficiario / Proveedor / Personal</label>
+              <input type="text" id="gasto-beneficiary" class="form-control" placeholder="ej. Inmobiliaria Central S.A.S">
+            </div>
+            <div class="form-group" style="flex: 1;">
+              <label class="form-label">N° Factura / Comprobante / Ref</label>
+              <input type="text" id="gasto-reference" class="form-control mono" placeholder="ej. FACT-2026-901">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Observaciones Contables o Justificación</label>
+            <textarea id="gasto-notes" class="form-control" rows="2" placeholder="Detalles adicionales, aprobación de gerencia, etc..."></textarea>
+          </div>
+
+          <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+            <button type="button" class="btn btn-secondary modal-cancel">Cancelar</button>
+            <button type="submit" class="btn btn-gold" id="btn-submit-gasto" style="min-width: 170px;">
+              💾 Guardar Gasto
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Reporte Certificado Imprimible de Gastos Operativos -->
+  <div class="modal-overlay" id="modal-print-gastos">
+    <div class="modal-card" style="max-width: 900px;">
+      <div class="modal-header no-print">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.3rem;">🖨️</span>
+          <div>
+            <h3 style="margin: 0;" id="print-gastos-modal-title">Certificado de Gastos Operativos (OPEX)</h3>
+            <p style="font-size: 0.74rem; color: var(--text-dim); margin: 2px 0 0 0;" id="print-gastos-modal-subtitle">Reporte formal de auditoría de egresos operativos para contabilidad y gerencia</p>
+          </div>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn btn-gold btn-sm" onclick="window.print()">🖨️ Imprimir Reporte</button>
+          <button class="modal-close">✕</button>
+        </div>
+      </div>
+      <div class="modal-body" id="gastos-print-content" style="padding: 10px;">
+        <!-- Populated dynamically -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Crear / Editar Usuario -->
+  <div class="modal-overlay" id="modal-user-form">
+    <div class="modal-card" style="max-width: 580px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.3rem;">👤</span>
+          <div>
+            <h3 style="margin: 0;" id="user-modal-title">Registrar Nuevo Usuario</h3>
+            <p style="font-size: 0.76rem; color: var(--text-dim); margin: 2px 0 0 0;">Asigna credenciales, rol y estado de acceso al sistema</p>
+          </div>
+        </div>
+        <button class="modal-close" type="button">✕</button>
+      </div>
+      <div class="modal-body">
+        <form id="form-user" onsubmit="App.submitUserForm(event)">
+          <input type="hidden" id="user-input-id">
+
+          <div class="form-group">
+            <label class="form-label">Nombre Completo del Colaborador:</label>
+            <input type="text" id="user-input-name" class="form-control" placeholder="ej. Carlos Eduardo Bóveda" required>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Nombre de Usuario (Login):</label>
+              <input type="text" id="user-input-username" class="form-control mono" placeholder="ej. cboveda" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Rol Asignado:</label>
+              <select id="user-input-role" class="form-control" required onchange="App.onUserModalRoleChange(this.value)">
+                <option value="comercial">💼 Asesor Comercial / Ventas</option>
+                <option value="cajero">💵 Caja & Facturación</option>
+                <option value="boveda">💎 Jefe de Bóveda & Joyería</option>
+                <option value="auditor">⚖️ Auditor Contable & Fiscal</option>
+                <option value="admin">⭐ Administrador General</option>
+                <option value="superadmin">👑 Super Administrador (Dueño)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Correo Electrónico:</label>
+              <input type="email" id="user-input-email" class="form-control" placeholder="ej. usuario@nexusjoyas.com">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Teléfono / WhatsApp:</label>
+              <input type="text" id="user-input-phone" class="form-control" placeholder="ej. +57 311 234 5678">
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Estado de Acceso:</label>
+              <select id="user-input-status" class="form-control">
+                <option value="activo">🟢 Activo (Puede Iniciar Sesión)</option>
+                <option value="inactivo">🔴 Inactivo (Acceso Bloqueado)</option>
+              </select>
+            </div>
+            <div class="form-group" id="user-password-group">
+              <label class="form-label" id="user-password-label">Contraseña de Seguridad:</label>
+              <input type="password" id="user-input-password" class="form-control" placeholder="Mínimo 4 caracteres">
+              <small id="user-password-hint" style="display: none; font-size: 0.72rem; color: var(--text-dim); margin-top: 3px;">Dejar en blanco si no deseas cambiar la clave</small>
+            </div>
+          </div>
+
+          <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+            <button type="button" class="btn btn-secondary modal-cancel">Cancelar</button>
+            <button type="submit" class="btn btn-gold" id="btn-submit-user" style="min-width: 170px;">
+              💾 Guardar Usuario
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Cambio Rápido de Contraseña -->
+  <div class="modal-overlay" id="modal-change-password">
+    <div class="modal-card" style="max-width: 440px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.3rem;">🔑</span>
+          <div>
+            <h3 style="margin: 0;">Cambiar Contraseña</h3>
+            <p style="font-size: 0.76rem; color: var(--text-dim); margin: 2px 0 0 0;" id="change-pass-user-label">Usuario: --</p>
+          </div>
+        </div>
+        <button class="modal-close" type="button">✕</button>
+      </div>
+      <div class="modal-body">
+        <form id="form-change-password" onsubmit="App.submitChangePassword(event)">
+          <input type="hidden" id="change-pass-user-id">
+
+          <div class="form-group">
+            <label class="form-label">Nueva Contraseña:</label>
+            <input type="password" id="change-pass-new" class="form-control" placeholder="••••••••" required minlength="4">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Confirmar Nueva Contraseña:</label>
+            <input type="password" id="change-pass-confirm" class="form-control" placeholder="••••••••" required minlength="4">
+          </div>
+
+          <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+            <button type="button" class="btn btn-secondary modal-cancel">Cancelar</button>
+            <button type="submit" class="btn btn-gold" style="min-width: 160px;">
+              🔑 Actualizar Clave
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="js/audio.js"></script>
+  <script src="js/balanza.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,31 @@
+{
+  "name": "nexus-por-mayor",
+  "version": "1.0.0",
+  "description": "Nexus por Mayor - Sistema de Gestión Mayorista Joyera por Gramo, Italiano y Nacional",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "seed:mongo": "node scripts/seed-mongo.js",
+    "test:stress": "node scripts/stress-test.js"
+  },
+  "keywords": [
+    "jewelry",
+    "wholesale",
+    "gold",
+    "oro-italiano",
+    "oro-nacional",
+    "cxc",
+    "cxp",
+    "nexus"
+  ],
+  "author": "Nexus Team",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^18.0.8",
+    "express": "^4.21.2",
+    "mongoose": "^9.11.2"
+  }
+}
