@@ -28,8 +28,13 @@ class DigitalScale {
 
   setWeight(grams) {
     this.currentGrams = Math.max(0, Number(Number(grams).toFixed(2)));
-    if (window.soundEngine) window.soundEngine.playScaleBeep();
     this.render();
+  }
+
+  setManualWeight(rawVal, sourceElem = null) {
+    const parsed = parseFloat(rawVal);
+    this.currentGrams = (!isNaN(parsed) && parsed >= 0) ? Math.max(0, Number(parsed.toFixed(2))) : 0;
+    this.render(sourceElem);
   }
 
   addWeight(grams) {
@@ -49,7 +54,6 @@ class DigitalScale {
   setCategory(cat) {
     this.selectedCategory = cat;
     this.customSaleRate = null; // reset custom negotiated rate
-    if (window.soundEngine) window.soundEngine.playChime();
     this.render();
   }
 
@@ -100,10 +104,29 @@ class DigitalScale {
     };
   }
 
-  render() {
+  render(activeSourceElem = null) {
+    const formattedGrams = this.currentGrams.toFixed(2);
+    const cleanGramsVal = this.currentGrams > 0 ? Number(this.currentGrams.toFixed(2)) : '';
+
     const lcdElem = document.getElementById('scale-lcd-digits');
     if (lcdElem) {
-      lcdElem.innerText = this.currentGrams.toFixed(2);
+      if (lcdElem.tagName === 'INPUT') {
+        if (document.activeElement !== lcdElem && activeSourceElem !== lcdElem) {
+          lcdElem.value = formattedGrams;
+        }
+      } else {
+        lcdElem.innerText = formattedGrams;
+      }
+    }
+
+    const manualGramsInput = document.getElementById('scale-manual-grams-input');
+    if (manualGramsInput && document.activeElement !== manualGramsInput && activeSourceElem !== manualGramsInput) {
+      manualGramsInput.value = cleanGramsVal;
+    }
+
+    const panelGramsInput = document.getElementById('scale-panel-grams-input');
+    if (panelGramsInput && document.activeElement !== panelGramsInput && activeSourceElem !== panelGramsInput) {
+      panelGramsInput.value = cleanGramsVal;
     }
 
     const { label, costPerGram, saleRate } = this.getDetailsForCategory();
@@ -131,7 +154,8 @@ class DigitalScale {
     const marginElem = document.getElementById('scale-margin-display');
     if (marginElem) {
       const marginPct = totalCost > 0 ? ((margin / totalCost) * 100).toFixed(1) : '0.0';
-      marginElem.innerText = `+$${margin.toLocaleString('es-CO')} (${marginPct}%)`;
+      const sign = margin >= 0 ? '+' : '-';
+      marginElem.innerText = `${sign}$${Math.abs(margin).toLocaleString('es-CO')} (${marginPct}%)`;
       marginElem.style.color = margin >= 0 ? '#34d399' : '#f87171';
     }
   }

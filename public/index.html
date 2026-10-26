@@ -247,15 +247,11 @@
         </div>
       </div>
 
-      <!-- Quick Utility Strip (Theme & Sound) -->
+      <!-- Quick Utility Strip (Theme) -->
       <div class="sidebar-util-strip">
-        <button class="util-strip-btn" onclick="App.toggleTheme()" title="Alternar Modo Claro / Oscuro">
+        <button class="util-strip-btn" onclick="App.toggleTheme()" title="Alternar Modo Claro / Oscuro" style="width: 100%;">
           <span id="sidebar-theme-icon">☀️</span>
           <span id="sidebar-theme-label">Claro</span>
-        </button>
-        <button class="util-strip-btn" id="btn-toggle-sound" onclick="App.toggleSound()" title="Alternar Sonido">
-          <span id="sidebar-sound-icon">🔊</span>
-          <span id="sidebar-sound-label">Audio</span>
         </button>
       </div>
     </aside>
@@ -339,86 +335,6 @@
             <div class="stat-footer">
               <span id="dash-cxc-grams">Eq: 0.00 g oro</span>
               <span id="dash-cxp-mo" style="color: #f87171;">Mano de obra: $0</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Interactive Digital Scale (Balanza Digital Pro Virtual) -->
-        <div class="scale-widget-card">
-          <div class="scale-header">
-            <div class="scale-title">
-              <div class="scale-status-light"></div>
-              <h3>Balanza Digital Mayorista & Negociador en Caliente</h3>
-            </div>
-            <div style="display: flex; gap: 8px;">
-              <select id="scale-cat-select" class="form-control" style="width: auto; padding: 6px 12px; font-size: 0.82rem;">
-                <option value="nacional">🇨🇴 Oro 18K Nacional</option>
-                <option value="italiano">🇮🇹 Oro 18K Italiano (750)</option>
-                <option value="puro24k">👑 Oro Puro 24K (Granalla)</option>
-                <option value="retal">♻️ Retal 18K Compra</option>
-              </select>
-              <button class="btn btn-secondary btn-sm" id="btn-scale-tare">Tara</button>
-              <button class="btn btn-secondary btn-sm" id="btn-scale-zero">Zero</button>
-            </div>
-          </div>
-
-          <div class="scale-body-grid">
-            <!-- Left: LCD Display & Quick Weight buttons -->
-            <div>
-              <div class="lcd-screen-wrapper">
-                <div class="lcd-top-indicators">
-                  <span>MODO: JOYERÍA FINA POR GRAMO</span>
-                  <span>CAL: 0.01g PREC</span>
-                </div>
-                <div class="lcd-main-digits">
-                  <span id="scale-lcd-digits">0.00</span>
-                  <span class="lcd-unit">g</span>
-                </div>
-              </div>
-
-              <!-- Quick weight chips -->
-              <div class="scale-quick-presets">
-                <span class="preset-chip" data-add="5">+5g</span>
-                <span class="preset-chip" data-add="10">+10g</span>
-                <span class="preset-chip" data-add="25">+25g</span>
-                <span class="preset-chip" data-add="50">+50g</span>
-                <span class="preset-chip" data-add="100">+100g</span>
-                <span class="preset-chip" data-add="250">+250g</span>
-                <span class="preset-chip" data-add="500">+500g</span>
-              </div>
-            </div>
-
-            <!-- Right: Real-time Negotiated Financial Breakdown -->
-            <div class="scale-calc-panel">
-              <div class="calc-row">
-                <span class="calc-label">Línea Seleccionada:</span>
-                <span class="calc-val" id="scale-cat-label" style="color: var(--gold-light);">Oro 18K Nacional</span>
-              </div>
-              <div class="calc-row">
-                <span class="calc-label">Costo Promedio Ponderado /g:</span>
-                <span class="calc-val" id="scale-cost-rate-display" style="color: #94a3b8;">$0 /g</span>
-              </div>
-              <div class="calc-row">
-                <span class="calc-label" style="color: #10b981; font-weight: 700;">Precio Venta Negociado /g ($):</span>
-                <input type="number" id="scale-sale-rate-input" class="form-control mono" style="width: 140px; text-align: right; padding: 4px 8px; font-size: 1rem; font-weight: 800; border-color: #10b981;">
-              </div>
-              <div class="calc-row">
-                <span class="calc-label">Margen Bruto de la Operación:</span>
-                <span class="calc-val" id="scale-margin-display" style="color: #34d399;">+$0 (0%)</span>
-              </div>
-              <div class="calc-row">
-                <span class="calc-label" style="font-weight: 700; color: var(--text-headings);">TOTAL LIQUIDACIÓN VENTA:</span>
-                <span class="calc-val big-gold" id="scale-total-display">$0</span>
-              </div>
-
-              <div style="display: flex; gap: 10px; margin-top: 16px;">
-                <button class="btn btn-gold btn-sm" style="flex: 1;" onclick="App.copyWhatsAppQuote()">
-                  📲 Copiar Cotización WhatsApp
-                </button>
-                <button class="btn btn-outline-gold btn-sm" onclick="App.switchView('despacho')">
-                  ⚡ Llevar a Despacho
-                </button>
-              </div>
             </div>
           </div>
         </div>
@@ -528,6 +444,102 @@
             </table>
           </div>
         </div>
+
+        <!-- Interactive Digital Scale (Balanza Digital Pro Virtual) - Ubicada al final de la página -->
+        <div class="scale-widget-card" style="margin-top: 24px;">
+          <div class="scale-header">
+            <div class="scale-title">
+              <div class="scale-status-light"></div>
+              <h3>Balanza Digital Mayorista & Negociador en Caliente</h3>
+            </div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <select id="scale-cat-select" class="form-control" style="width: auto; padding: 6px 12px; font-size: 0.82rem;">
+                <option value="nacional">🇨🇴 Oro 18K Nacional</option>
+                <option value="italiano">🇮🇹 Oro 18K Italiano (750)</option>
+                <option value="puro24k">👑 Oro Puro 24K (Granalla)</option>
+                <option value="retal">♻️ Retal 18K Compra</option>
+              </select>
+              <button class="btn btn-secondary btn-sm" id="btn-scale-tare">Tara</button>
+              <button class="btn btn-secondary btn-sm" id="btn-scale-zero">Zero</button>
+            </div>
+          </div>
+
+          <div class="scale-body-grid">
+            <!-- Left: LCD Display, Manual Grammage Input & Quick Weight buttons -->
+            <div>
+              <div class="lcd-screen-wrapper" title="Haz clic en los dígitos para ingresar el gramaje manualmente">
+                <div class="lcd-top-indicators">
+                  <span>MODO: JOYERÍA FINA POR GRAMO</span>
+                  <span>CAL: 0.01g PREC • MANUAL / DIGITAL</span>
+                </div>
+                <div class="lcd-main-digits">
+                  <input type="number" step="0.01" min="0" id="scale-lcd-digits" class="lcd-digits-input" value="0.00" placeholder="0.00" aria-label="Peso en gramos en pantalla LCD">
+                  <span class="lcd-unit">g</span>
+                </div>
+              </div>
+
+              <!-- Manual Grammage Input Box -->
+              <div class="scale-manual-entry-row" style="display: flex; gap: 8px; align-items: center; margin-top: 12px;">
+                <div style="position: relative; flex: 1;">
+                  <input type="number" step="0.01" min="0" id="scale-manual-grams-input" class="form-control mono" placeholder="✍️ Ingresar gramaje manual (ej. 18.45)..." style="padding: 8px 34px 8px 12px; font-size: 0.9rem; font-weight: 700; border-color: rgba(56, 189, 248, 0.45);">
+                  <span style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; color: #38bdf8; font-weight: 800; pointer-events: none;">g</span>
+                </div>
+              </div>
+
+              <!-- Quick weight chips -->
+              <div class="scale-quick-presets">
+                <span class="preset-chip" data-add="5">+5g</span>
+                <span class="preset-chip" data-add="10">+10g</span>
+                <span class="preset-chip" data-add="25">+25g</span>
+                <span class="preset-chip" data-add="50">+50g</span>
+                <span class="preset-chip" data-add="100">+100g</span>
+                <span class="preset-chip" data-add="250">+250g</span>
+                <span class="preset-chip" data-add="500">+500g</span>
+              </div>
+            </div>
+
+            <!-- Right: Real-time Negotiated Financial Breakdown -->
+            <div class="scale-calc-panel">
+              <div class="calc-row">
+                <span class="calc-label">Línea Seleccionada:</span>
+                <span class="calc-val" id="scale-cat-label" style="color: var(--gold-light);">Oro 18K Nacional</span>
+              </div>
+              <div class="calc-row">
+                <span class="calc-label" style="color: #38bdf8; font-weight: 700;">Gramaje a Liquidar (g):</span>
+                <input type="number" step="0.01" min="0" id="scale-panel-grams-input" class="form-control mono" placeholder="0.00" style="width: 140px; text-align: right; padding: 4px 8px; font-size: 1rem; font-weight: 800; border-color: #38bdf8; color: #38bdf8;">
+              </div>
+              <div class="calc-row">
+                <span class="calc-label">Costo Promedio Ponderado /g:</span>
+                <span class="calc-val" id="scale-cost-rate-display" style="color: #94a3b8;">$0 /g</span>
+              </div>
+              <div class="calc-row">
+                <span class="calc-label" style="color: #10b981; font-weight: 700;">Precio Venta Negociado /g ($):</span>
+                <input type="number" id="scale-sale-rate-input" class="form-control mono" style="width: 140px; text-align: right; padding: 4px 8px; font-size: 1rem; font-weight: 800; border-color: #10b981;">
+              </div>
+              <div class="calc-row">
+                <span class="calc-label">Costo Base de la Operación:</span>
+                <span class="calc-val" id="scale-cost-display" style="color: #94a3b8;">$0</span>
+              </div>
+              <div class="calc-row">
+                <span class="calc-label">Margen Bruto de la Operación:</span>
+                <span class="calc-val" id="scale-margin-display" style="color: #34d399;">+$0 (0%)</span>
+              </div>
+              <div class="calc-row">
+                <span class="calc-label" style="font-weight: 700; color: var(--text-headings);">TOTAL LIQUIDACIÓN VENTA:</span>
+                <span class="calc-val big-gold" id="scale-total-display">$0</span>
+              </div>
+
+              <div style="display: flex; gap: 10px; margin-top: 16px;">
+                <button class="btn btn-gold btn-sm" style="flex: 1;" onclick="App.copyWhatsAppQuote()">
+                  📲 Copiar Cotización WhatsApp
+                </button>
+                <button class="btn btn-outline-gold btn-sm" onclick="App.transferScaleToDespacho()">
+                  ⚡ Llevar a Despacho
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- ========================================================= -->
@@ -576,6 +588,17 @@
             <div class="stat-value" id="puro-boveda-avg" style="color: var(--gold-light);">$0 /g</div>
             <div class="stat-footer">
               <span>Calculado matemáticamente por cada compra</span>
+            </div>
+          </div>
+
+          <div class="stat-card accent-emerald">
+            <div class="stat-card-header">
+              <span class="stat-label">Costo Promedio de Puro Trabajado</span>
+              <div class="stat-icon">⚗️</div>
+            </div>
+            <div class="stat-value" id="puro-trabajado-avg" style="color: #34d399;">$0 /g</div>
+            <div class="stat-footer">
+              <span>Total del Puro 24K ÷ 1.38</span>
             </div>
           </div>
 
@@ -3572,7 +3595,6 @@
   </div>
 
   <!-- Scripts -->
-  <script src="js/audio.js"></script>
   <script src="js/balanza.js"></script>
   <script src="js/app.js"></script>
 </body>
