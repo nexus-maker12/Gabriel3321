@@ -32,6 +32,12 @@ class DigitalScale {
     this.render();
   }
 
+  setManualWeight(rawVal, sourceElem = null) {
+    const parsed = parseFloat(rawVal);
+    this.currentGrams = (Number.isFinite(parsed) && parsed >= 0) ? Math.max(0, Number(parsed.toFixed(2))) : 0;
+    this.render(sourceElem);
+  }
+
   addWeight(grams) {
     if(!Number.isFinite(Number(grams))) return;
     this.setWeight(this.currentGrams + Number(grams));
@@ -101,10 +107,29 @@ class DigitalScale {
     };
   }
 
-  render() {
+  render(activeSourceElem = null) {
+    const formattedGrams = this.currentGrams.toFixed(2);
+    const cleanGramsVal = this.currentGrams > 0 ? Number(this.currentGrams.toFixed(2)) : '';
+
     const lcdElem = document.getElementById('scale-lcd-digits');
     if (lcdElem) {
-      lcdElem.innerText = this.currentGrams.toFixed(2);
+      if (lcdElem.tagName === 'INPUT') {
+        if (document.activeElement !== lcdElem && activeSourceElem !== lcdElem) {
+          lcdElem.value = formattedGrams;
+        }
+      } else {
+        lcdElem.innerText = formattedGrams;
+      }
+    }
+
+    const manualGramsInput = document.getElementById('scale-manual-grams-input');
+    if (manualGramsInput && document.activeElement !== manualGramsInput && activeSourceElem !== manualGramsInput) {
+      manualGramsInput.value = cleanGramsVal;
+    }
+
+    const panelGramsInput = document.getElementById('scale-panel-grams-input');
+    if (panelGramsInput && document.activeElement !== panelGramsInput && activeSourceElem !== panelGramsInput) {
+      panelGramsInput.value = cleanGramsVal;
     }
 
     const { label, costPerGram, saleRate } = this.getDetailsForCategory();

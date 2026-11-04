@@ -74,3 +74,15 @@ test('Cambiar de sesión elimina los datos del usuario anterior',()=>{
 test('El despacho utiliza la tarifa de retal configurada',()=>{
   const {app,element}=client();app.rates={retal_oro18k_compra:50};app.renderDispatchTable=()=>{};app.renderDespacho();assert.equal(element('pay-scrap-rate').value,50);
 });
+
+test('El gramaje manual sincroniza entradas y descarta valores no finitos',()=>{
+  const {scale,element}=client();
+  element('scale-lcd-digits').tagName='INPUT';
+  scale.setManualWeight('18.456');
+  assert.equal(scale.currentGrams,18.46);
+  assert.equal(element('scale-lcd-digits').value,'18.46');
+  assert.equal(element('scale-manual-grams-input').value,18.46);
+  assert.equal(element('scale-panel-grams-input').value,18.46);
+  scale.setManualWeight('Infinity');assert.equal(scale.currentGrams,0);
+  scale.setManualWeight('-2');assert.equal(scale.currentGrams,0);
+});

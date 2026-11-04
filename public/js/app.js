@@ -286,6 +286,32 @@ const App = {
         window.digitalScale.setCustomSaleRate(e.target.value);
       });
     }
+
+    // Manual Grammage Inputs (LCD, below LCD, and right panel)
+    const gramInputs = [
+      document.getElementById('scale-lcd-digits'),
+      document.getElementById('scale-manual-grams-input'),
+      document.getElementById('scale-panel-grams-input')
+    ].filter(Boolean);
+
+    gramInputs.forEach(inputEl => {
+      if (inputEl.tagName !== 'INPUT') return;
+      inputEl.addEventListener('focus', () => {
+        if (inputEl.id === 'scale-lcd-digits' && window.digitalScale && window.digitalScale.currentGrams === 0) {
+          inputEl.select();
+        }
+      });
+      inputEl.addEventListener('input', (e) => {
+        if (window.digitalScale) {
+          window.digitalScale.setManualWeight(e.target.value, inputEl);
+        }
+      });
+      inputEl.addEventListener('blur', () => {
+        if (window.digitalScale) {
+          window.digitalScale.render();
+        }
+      });
+    });
   },
 
   closeAllModals() {
@@ -362,9 +388,6 @@ const App = {
     const modal = document.getElementById(modalId);
     if (modal) {
       modal.classList.add('active');
-      if (window.soundEngine) {
-        try { window.soundEngine.playChime(); } catch (e) {}
-      }
     }
   },
 
@@ -639,15 +662,18 @@ const App = {
   renderPuroMaquila() {
     const stockElem = document.getElementById('puro-boveda-stock');
     const avgElem = document.getElementById('puro-boveda-avg');
+    const avgTrabajadoElem = document.getElementById('puro-trabajado-avg');
     const valElem = document.getElementById('puro-boveda-val');
     const inTalleresElem = document.getElementById('puro-talleres-stock');
 
     const stock = Number(this.puroData.stockGrams || 0);
     const avg = Number(this.averages?.promedioPuro24k ?? this.rates?.override_promedioPuro24k ?? this.rates?.oro24k_fino_benchmark ?? 0);
+    const avgTrabajado = avg > 0 ? Math.round(avg / 1.38) : 0;
     const inTalleres = (this.suppliers || []).reduce((acc, s) => acc + (Number(s.puroInHandsGrams) || 0), 0);
 
     if (stockElem) stockElem.innerText = `${stock.toFixed(2)} g`;
     if (avgElem) avgElem.innerText = `$${avg.toLocaleString('es-CO')} /g`;
+    if (avgTrabajadoElem) avgTrabajadoElem.innerText = `$${avgTrabajado.toLocaleString('es-CO')} /g`;
     if (valElem) valElem.innerText = `$${Math.round(stock * avg).toLocaleString('es-CO')}`;
     if (inTalleresElem) inTalleresElem.innerText = `${inTalleres.toFixed(2)} g`;
 
@@ -1021,7 +1047,6 @@ const App = {
       });
     }
 
-    if (window.soundEngine) window.soundEngine.playChime();
     this.renderDispatchTable();
   },
 
@@ -1196,7 +1221,6 @@ const App = {
       }).then(r => r.json());
 
       if (res.success) {
-        if (window.soundEngine) window.soundEngine.playSuccess();
         alert(`¡Remisión ${res.order.remisionNumber} generada con éxito!`);
         this.dispatchCart = [];
         await this.refreshAllData();
@@ -1416,9 +1440,6 @@ const App = {
     const modal = document.getElementById('modal-new-client');
     if (modal) {
       modal.classList.add('active');
-      if (window.soundEngine) {
-        try { window.soundEngine.playChime(); } catch (e) {}
-      }
     }
   },
 
@@ -1457,9 +1478,6 @@ const App = {
       }
 
       if (res.success) {
-        if (window.soundEngine) {
-          try { window.soundEngine.playSuccess(); } catch (e) {}
-        }
         alert(id ? '¡Joyería actualizada correctamente!' : '¡Joyería registrada con éxito!');
         this.closeAllModals();
         await this.refreshAllData();
@@ -1493,7 +1511,6 @@ const App = {
     try {
       const res = await this.apiFetch(`/api/clients/${id}`, { method: 'DELETE' }).then(r => r.json());
       if (res.success) {
-        if (window.soundEngine) window.soundEngine.playSuccess();
         alert(res.message || 'Joyería eliminada');
         await this.refreshAllData();
         this.render();
@@ -1609,9 +1626,6 @@ const App = {
     const modal = document.getElementById('modal-new-supplier');
     if (modal) {
       modal.classList.add('active');
-      if (window.soundEngine) {
-        try { window.soundEngine.playChime(); } catch (e) {}
-      }
     }
   },
 
@@ -1648,7 +1662,6 @@ const App = {
       }
 
       if (res.success) {
-        if (window.soundEngine) window.soundEngine.playSuccess();
         alert(id ? '¡Proveedor / Taller actualizado correctamente!' : '¡Proveedor / Taller registrado con éxito!');
         this.closeAllModals();
         await this.refreshAllData();
@@ -1686,7 +1699,6 @@ const App = {
       }).then(r => r.json());
 
       if (res.success) {
-        if (window.soundEngine) window.soundEngine.playSuccess();
         alert(`¡Proveedor / Taller "${res.supplier.name}" añadido exitosamente!`);
         document.getElementById('form-quick-supplier')?.reset();
         const moInput = document.getElementById('quick-sup-mo');
@@ -1712,7 +1724,6 @@ const App = {
     try {
       const res = await this.apiFetch(`/api/suppliers/${id}`, { method: 'DELETE' }).then(r => r.json());
       if (res.success) {
-        if (window.soundEngine) window.soundEngine.playSuccess();
         alert(res.message || 'Proveedor eliminado');
         await this.refreshAllData();
         this.render();
@@ -2210,7 +2221,6 @@ const App = {
     this.switchClientDetailTab('ledger');
 
     modal.classList.add('active');
-    if (window.soundEngine) window.soundEngine.playChime();
   },
 
   switchClientDetailTab(tabName) {
@@ -2487,7 +2497,6 @@ const App = {
     `;
 
     modal.classList.add('active');
-    if (window.soundEngine) window.soundEngine.playChime();
   },
 
   printGlobalCarteraReport() {
@@ -2903,7 +2912,6 @@ const App = {
       }
 
       if (res.success) {
-        if (window.soundEngine) window.soundEngine.playSuccess();
         alert(id ? '¡Método de pago actualizado exitosamente!' : '¡Método de pago registrado exitosamente!');
         this.closeAllModals();
         await this.refreshAllData();
@@ -2920,7 +2928,6 @@ const App = {
     try {
       const res = await this.apiFetch(`/api/payment-methods/${id}/toggle`, { method: 'PATCH' }).then(r => r.json());
       if (res.success) {
-        if (window.soundEngine) window.soundEngine.playChime();
         await this.refreshAllData();
         this.render();
       }
@@ -2940,7 +2947,6 @@ const App = {
     try {
       const res = await this.apiFetch(`/api/payment-methods/${id}`, { method: 'DELETE' }).then(r => r.json());
       if (res.success) {
-        if (window.soundEngine) window.soundEngine.playSuccess();
         alert(res.message || 'Método de pago eliminado.');
         await this.refreshAllData();
         this.render();
@@ -2952,7 +2958,6 @@ const App = {
 
   copyToClipboard(text, msg = '¡Copiado al portapapeles!') {
     navigator.clipboard.writeText(text).then(() => {
-      if (window.soundEngine) window.soundEngine.playChime();
       alert(msg);
     }).catch(() => {
       prompt('Copia manualmente:', text);
@@ -2996,7 +3001,6 @@ const App = {
       }).then(r => r.json());
 
       if (res.success) {
-        if (window.soundEngine) window.soundEngine.playSuccess();
         alert(`¡Compra de ${grams}g de Puro 24K registrada! Nuevo costo promedio ponderado de puro: $${res.newAverageCost.toLocaleString('es-CO')}/g`);
         this.closeAllModals();
         await this.refreshAllData();
@@ -3049,7 +3053,6 @@ const App = {
       }).then(r => r.json());
 
       if (res.success) {
-        if (window.soundEngine) window.soundEngine.playSuccess();
         alert(`¡Entregados ${grams24k}g de Puro 24K a ${res.supplier.name}! Saldo de puro actualizado.`);
         this.closeAllModals();
         await this.refreshAllData();
@@ -3116,7 +3119,6 @@ const App = {
       }).then(r => r.json());
 
       if (res.success) {
-        if (window.soundEngine) window.soundEngine.playSuccess();
         alert(`¡Recibido lote de ${grams18kReceived}g! Costo total integrado: $${res.item.costPerGram.toLocaleString('es-CO')}/g. Mano de obra cargada a CxP: $${res.delivery.manoDeObraTotal.toLocaleString('es-CO')}.`);
         this.closeAllModals();
         await this.refreshAllData();
@@ -3219,7 +3221,6 @@ const App = {
       }).then(r => r.json());
 
       if (res.success) {
-        if (window.soundEngine) window.soundEngine.playSuccess();
         alert('¡Abono registrado con éxito en el libro mayor!');
         this.closeAllModals();
         await this.refreshAllData();
@@ -3278,7 +3279,6 @@ const App = {
       }).then(r => r.json());
 
       if (res.success) {
-        if (window.soundEngine) window.soundEngine.playSuccess();
         alert(`¡Lote ${res.item.name} de ${res.item.weightGrams}g ingresado exitosamente!`);
         this.closeAllModals();
         await this.refreshAllData();
@@ -3300,7 +3300,6 @@ const App = {
 
   async setCuadrePeriod(period) {
     this.cuadrePeriod = period;
-    if (window.soundEngine) window.soundEngine.playChime();
 
     document.querySelectorAll('.cuadre-tab').forEach(tab => {
       if (tab.getAttribute('data-period') === period) {
@@ -3638,7 +3637,6 @@ const App = {
       }).then(r => r.json());
 
       if (res.success) {
-        if (window.soundEngine) window.soundEngine.playSuccess();
         alert('¡Movimiento de caja registrado con éxito!');
         this.closeAllModals();
         await this.loadCuadreData();
@@ -3787,6 +3785,36 @@ const App = {
     });
   },
 
+  transferScaleToDespacho() {
+    if (!this.hasPermission('despacho', 'canView')) return;
+    const scale = window.digitalScale;
+    const grams = scale ? Number(scale.currentGrams) || 0 : 0;
+    const category = scale ? scale.selectedCategory : 'nacional';
+    const details = scale ? scale.getDetailsForCategory() : { saleRate: 0 };
+
+    this.switchView('despacho');
+
+    const itemSelect = document.getElementById('despacho-item-select');
+    if (itemSelect && this.items && this.items.length > 0) {
+      const matchingItem = this.items.find(i => i.category === category && Number(i.weightGrams) > 0) || this.items[0];
+      if (matchingItem) {
+        itemSelect.value = matchingItem.id;
+        const costHint = document.getElementById('despacho-cost-hint');
+        if (costHint) costHint.innerText = `Costo base: $${matchingItem.costPerGram.toLocaleString('es-CO')} /g`;
+      }
+    }
+
+    const weightInput = document.getElementById('despacho-weight-input');
+    if (weightInput && grams > 0) {
+      weightInput.value = Number(grams.toFixed(2));
+    }
+
+    const saleInput = document.getElementById('despacho-sale-price-input');
+    if (saleInput && details.saleRate > 0) {
+      saleInput.value = Math.round(details.saleRate);
+    }
+  },
+
   // Aliases and Operational UI Helpers
 
 
@@ -3811,9 +3839,6 @@ const App = {
       }).then(r => r.json());
 
       if (res.success) {
-        if (window.soundEngine) {
-          try { window.soundEngine.playSuccess(); } catch (e) {}
-        }
         await this.refreshAllData();
         this.renderInventory();
         alert(`¡Gramaje de ${item.name} actualizado exitosamente a ${newWeight.toFixed(2)}g!`);
@@ -3896,9 +3921,6 @@ const App = {
       }).then(r => r.json());
 
       if (res.success) {
-        if (window.soundEngine) {
-          try { window.soundEngine.playSuccess(); } catch (e) {}
-        }
         this.closeAllModals();
         await this.refreshAllData();
         this.renderGoldTicker();
@@ -3926,9 +3948,6 @@ const App = {
       }).then(r => r.json());
 
       if (res.success) {
-        if (window.soundEngine) {
-          try { window.soundEngine.playSuccess(); } catch (e) {}
-        }
         this.closeAllModals();
         await this.refreshAllData();
         this.renderGoldTicker();
@@ -4124,9 +4143,6 @@ const App = {
       }
 
       if (res.success) {
-        if (window.soundEngine) {
-          try { window.soundEngine.playSuccess(); } catch (e) {}
-        }
         await this.refreshAllData();
         this.resetCategoryForm();
         this.renderCategoriesList();
@@ -4164,9 +4180,6 @@ const App = {
       }).then(r => r.json());
 
       if (res.success) {
-        if (window.soundEngine) {
-          try { window.soundEngine.playSuccess(); } catch (e) {}
-        }
         if (this.activeCategoryFilter === cat.slug) {
           this.activeCategoryFilter = 'all';
         }
@@ -5176,7 +5189,6 @@ const App = {
     if (rangeContainer && period !== 'custom') {
       rangeContainer.style.display = 'none';
     }
-    if (window.soundEngine) window.soundEngine.playChime();
     this.loadGastosOperativos();
   },
 
@@ -5204,7 +5216,6 @@ const App = {
     this.gastosPeriod = 'custom';
     this.gastosStartDate = startInput.value;
     this.gastosEndDate = endInput.value;
-    if (window.soundEngine) window.soundEngine.playChime();
     this.loadGastosOperativos();
   },
 
@@ -5212,13 +5223,11 @@ const App = {
     this.gastosCategoryFilter = cat;
     const sel = document.getElementById('gastos-filter-category');
     if (sel) sel.value = cat;
-    if (window.soundEngine) window.soundEngine.playChime();
     this.loadGastosOperativos();
   },
 
   setGastosMethodFilter(method) {
     this.gastosMethodFilter = method;
-    if (window.soundEngine) window.soundEngine.playChime();
     this.loadGastosOperativos();
   },
 
@@ -5247,7 +5256,6 @@ const App = {
     const rangeContainer = document.getElementById('gastos-custom-range-container');
     if (rangeContainer) rangeContainer.style.display = 'none';
 
-    if (window.soundEngine) window.soundEngine.playChime();
     this.loadGastosOperativos();
   },
 
@@ -5280,7 +5288,6 @@ const App = {
     if (submitBtn) submitBtn.innerHTML = ' Guardar Gasto';
 
     this.openModal('modal-gasto-operativo');
-    if (window.soundEngine) window.soundEngine.playChime();
   },
 
   openEditGastoModal(gastoId) {
@@ -5322,7 +5329,6 @@ const App = {
     if (submitBtn) submitBtn.innerHTML = ' Actualizar Cambios';
 
     this.openModal('modal-gasto-operativo');
-    if (window.soundEngine) window.soundEngine.playChime();
   },
 
   async submitGastoForm() {
@@ -5390,7 +5396,6 @@ const App = {
       const data = await res.json();
 
       if (data.success) {
-        if (window.soundEngine) window.soundEngine.playChime();
         this.closeAllModals();
         await this.loadGastosOperativos();
         await this.refreshAllData(); // Refresh vault chips and general metrics
@@ -5428,7 +5433,6 @@ const App = {
       });
       const data = await res.json();
       if (data.success) {
-        if (window.soundEngine) window.soundEngine.playChime();
         alert(data.message || 'Gasto operativo eliminado exitosamente.');
         await this.loadGastosOperativos();
         await this.refreshAllData();
@@ -5545,7 +5549,6 @@ const App = {
 
     const modal = document.getElementById('modal-print-gastos');
     if (modal) modal.classList.add('active');
-    if (window.soundEngine) window.soundEngine.playChime();
   },
 
   openPrintGastosModal() {
@@ -5707,7 +5710,6 @@ const App = {
 
     const modal = document.getElementById('modal-print-gastos');
     if (modal) modal.classList.add('active');
-    if (window.soundEngine) window.soundEngine.playChime();
   },
 
   exportGastosCSV() {
@@ -5913,7 +5915,6 @@ const App = {
         } catch(storageError) { /* Session remains valid in memory. */ }
         await this.refreshAllData();
         this.showLoginAlert(`¡Acceso Concedido! Bienvenido, ${res.user.name}`, 'success');
-        if (window.soundEngine) window.soundEngine.playChime();
 
         setTimeout(() => {
           this.updateHeaderUserProfile();
@@ -5932,7 +5933,6 @@ const App = {
 
       } else {
         this.showLoginAlert(res.message || 'Credenciales inválidas.', 'danger');
-        if (window.soundEngine) window.soundEngine.playWarning();
       }
     } catch (err) {
       console.error('Error de autenticación:', err);
@@ -6006,7 +6006,6 @@ const App = {
     if (alertEl) alertEl.style.display = 'none';
 
     this.showLoginScreen();
-    if (window.soundEngine) window.soundEngine.playChime();
   },
 
   hasPermission(moduleKey, action = 'canView') {
@@ -6406,7 +6405,6 @@ const App = {
         alert(res.message || 'Usuario guardado exitosamente.');
         this.closeAllModals();
         await this.loadUsersAndRoles();
-        if (window.soundEngine) window.soundEngine.playChime();
       } else {
         alert('Error: ' + (res.message || 'No se pudo guardar el usuario.'));
       }
@@ -6446,7 +6444,6 @@ const App = {
 
       if (res.success) {
         await this.loadUsersAndRoles();
-        if (window.soundEngine) window.soundEngine.playChime();
       } else {
         alert('Error: ' + res.message);
       }
@@ -6479,7 +6476,6 @@ const App = {
       if (res.success) {
         alert(res.message);
         await this.loadUsersAndRoles();
-        if (window.soundEngine) window.soundEngine.playChime();
       } else {
         alert('Error: ' + res.message);
       }
@@ -6537,7 +6533,6 @@ const App = {
       if (res.success) {
         alert('Contraseña actualizada con éxito.');
         this.closeAllModals();
-        if (window.soundEngine) window.soundEngine.playChime();
       } else {
         alert('Error: ' + res.message);
       }
@@ -6754,7 +6749,6 @@ const App = {
       if (res.success) {
         this.rolesCatalog = res.roles;
         alert(`¡Permisos para el rol "${updatedRoles[roleKey].name || roleKey}" guardados con éxito!`);
-        if (window.soundEngine) window.soundEngine.playChime();
 
         // If updated role belongs to current user, update permissions immediately in session!
         if (this.currentUser && this.currentUser.role === roleKey) {

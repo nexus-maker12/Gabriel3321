@@ -357,3 +357,9 @@ body:has(.modal-overlay.active) { overflow: hidden; }
   .story-content { padding: 24px 0 0; }
   html[data-theme] .story-content h2 { font-size: clamp(32px,9vw,46px); line-height: 1.03; }
 }
+
+/* Manual scale follows the same quiet brand treatment as the dashboard. */
+.lcd-digits-input { font-family: Inter, Arial, sans-serif; color: #f5f5f0 !important; text-shadow: none; box-shadow: none; }
+.lcd-digits-input:focus { box-shadow: none; outline-color: var(--gold-light); }
+.scale-manual-entry-row input, #scale-panel-grams-input { border-color: var(--border-medium) !important; color: var(--text-headings) !important; }
+.scale-manual-entry-row span { color: var(--text-muted) !important; font-family: inherit !important; }

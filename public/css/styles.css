@@ -702,6 +702,40 @@ h1, h2, h3, .font-cinzel {
   line-height: 1;
   text-align: right;
   letter-spacing: 0.05em;
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+}
+
+.lcd-digits-input {
+  background: transparent !important;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 3.2rem;
+  font-weight: 800;
+  color: #38bdf8 !important;
+  text-shadow: 0 0 15px rgba(56, 189, 248, 0.4);
+  line-height: 1;
+  text-align: right;
+  letter-spacing: 0.05em;
+  width: 100%;
+  max-width: 280px;
+  padding: 0;
+  margin: 0;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.lcd-digits-input::-webkit-outer-spin-button,
+.lcd-digits-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.lcd-digits-input:focus {
+  border-bottom: 1px dashed rgba(56, 189, 248, 0.5) !important;
 }
 
 .lcd-unit {
