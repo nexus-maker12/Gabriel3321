@@ -6,15 +6,25 @@ const path = require('path');
 const crypto = require('crypto');
 const { connectDB, isMongoConnected, fetchStateFromMongo, models } = require('./config/db');
 
+const { AsyncLocalStorage } = require('node:async_hooks');
+const domain = require('./lib/domain');
+const security = require('./lib/security');
+const { hashPassword, verifyPassword, tokenHash } = security;
+const requestState = new AsyncLocalStorage();
+const asyncRoute = handler => (req,res,next) => {
+  const scope=requestState.getStore();
+  if(scope) scope.pending++;
+  return Promise.resolve().then(()=>handler(req,res,next)).catch(next).finally(()=>{
+    if(scope) {scope.pending--;scope.releaseIfReady();}
+  });
+};
 const app = express();
 const PORT = process.env.PORT || 3500;
 const isVercel = Boolean(process.env.VERCEL);
 const ORIGINAL_DB_PATH = path.join(__dirname, 'data', 'database.json');
-const DB_PATH = isVercel
-  ? path.join('/tmp', 'database.json')
-  : ORIGINAL_DB_PATH;
+const DB_PATH = process.env.AUREA_DATA_FILE ? path.resolve(process.env.AUREA_DATA_FILE) : (isVercel ? path.join('/tmp', 'database.json') : ORIGINAL_DB_PATH);
 
-if (isVercel) {
+if (isVercel && !process.env.AUREA_DATA_FILE) {
   try {
     if (!fs.existsSync(DB_PATH) && fs.existsSync(ORIGINAL_DB_PATH)) {
       fs.copyFileSync(ORIGINAL_DB_PATH, DB_PATH);
@@ -24,7 +34,15 @@ if (isVercel) {
   }
 }
 
-app.use(cors());
+app.disable('x-powered-by');
+app.use(cors({ origin: false }));
+app.use((req,res,next) => {
+  res.setHeader('X-Content-Type-Options','nosniff');
+  res.setHeader('Referrer-Policy','same-origin');
+  res.setHeader('Content-Security-Policy', "frame-ancestors 'none'; object-src 'none'; base-uri 'self'");
+  if(req.path.startsWith('/api/')) res.setHeader('Cache-Control','no-store');
+  next();
+});
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -197,57 +215,12 @@ const DEFAULT_ROLES = {
   }
 };
 
-const AUTH_SECRET = process.env.SESSION_SECRET || 'nexus-secret-key-2026-production-secure-token';
 const activeSessions = new Map();
-
-function hashPassword(password, salt) {
-  if (!salt) salt = crypto.randomBytes(16).toString('hex');
-  const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
-  return { hash, salt };
-}
-
-function verifyPassword(password, hash, salt) {
-  if (!password || !hash || !salt) return false;
-  const calc = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
-  return calc === hash;
-}
-
-function createAuthToken(user, roleData) {
-  const payload = {
-    userId: user.id,
-    username: user.username,
-    role: user.role,
-    expiresAt: Date.now() + (30 * 24 * 60 * 60 * 1000) // 30 days
-  };
-  const payloadB64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
-  const signature = crypto.createHmac('sha256', AUTH_SECRET).update(payloadB64).digest('base64url');
-  return `${payloadB64}.${signature}`;
-}
-
+function createAuthToken() { return crypto.randomBytes(32).toString('base64url'); }
 function verifyAuthToken(token) {
-  if (!token || typeof token !== 'string') return null;
-  if (token.includes('.')) {
-    const parts = token.split('.');
-    if (parts.length === 2) {
-      const [payloadB64, signature] = parts;
-      const expectedSig = crypto.createHmac('sha256', AUTH_SECRET).update(payloadB64).digest('base64url');
-      if (signature === expectedSig) {
-        try {
-          const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf-8'));
-          if (payload.expiresAt && Date.now() <= payload.expiresAt) {
-            return payload;
-          }
-        } catch (e) {}
-      }
-    }
-  }
-  if (activeSessions.has(token)) {
-    const s = activeSessions.get(token);
-    if (Date.now() <= s.expiresAt) {
-      return { userId: s.userId, username: s.username, role: s.role };
-    }
-  }
-  return null;
+  if (typeof token !== 'string' || token.length > 200) return null;
+  const session = (readDB().sessions || []).find(session => session.id === tokenHash(token));
+  return session && session.expiresAt > Date.now() ? {userId:session.userId} : null;
 }
 
 function ensureDBShape(db) {
@@ -266,6 +239,7 @@ function ensureDBShape(db) {
   if (!Array.isArray(db.cashMovements)) db.cashMovements = [];
   if (!Array.isArray(db.users)) db.users = [];
   if (!db.roles || typeof db.roles !== 'object') db.roles = JSON.parse(JSON.stringify(DEFAULT_ROLES));
+  if (!Array.isArray(db.sessions)) db.sessions = [];
   initAuth(db);
   return db;
 }
@@ -291,7 +265,9 @@ function initAuth(db) {
 
   let superadmin = db.users.find(u => u.role === 'superadmin' || u.username === 'superadmin' || u.username === 'admin');
   if (!superadmin) {
-    const { hash, salt } = hashPassword('nexus2026!');
+    const initialPassword = process.env.INITIAL_ADMIN_PASSWORD;
+    if (!initialPassword || initialPassword.length < 8) domain.fail('Configura INITIAL_ADMIN_PASSWORD (mínimo 8 caracteres) para crear la primera cuenta.',503);
+    const { hash, salt } = hashPassword(initialPassword);
     superadmin = {
       id: 'usr-superadmin',
       name: 'Super Administrador (Dueño)',
@@ -312,20 +288,40 @@ function initAuth(db) {
   return modified;
 }
 
-// Middleware: Ensure MongoDB is connected and cacheDB is hydrated before handling any API request
-app.use(async (req, res, next) => {
-  if (req.url.startsWith('/api/')) {
-    if (!isMongoConnected()) {
+// Serialize requests inside this process; handlers mutate an isolated snapshot.
+let requestQueue = Promise.resolve();
+const loginAttempts = new Map();
+app.use(asyncRoute(async (req,res,next) => {
+  if (!req.path.startsWith('/api/')) return next();
+  const previous = requestQueue;
+  let release;
+  requestQueue = new Promise(resolve => { release = resolve; });
+  await previous;
+  if (req.aborted || res.destroyed) { release(); return; }
+  let scope;
+  const finished=()=>{if(scope){scope.ended=true;scope.releaseIfReady();}else release();};
+  res.once('finish',finished); res.once('close',finished);
+  try {
+    security.validateInput(req);
+    const db = await getDB();
+    if(req.aborted || res.destroyed) {release();return;}
+    scope={db:structuredClone(db),pending:0,ended:false,releaseIfReady(){if(this.ended&&this.pending===0)release();}};
+    requestState.run(scope,() => {
       try {
-        await connectDB();
-      } catch (e) {}
-    }
-    try {
-      await getDB();
-    } catch (e) {}
-  }
-  next();
-});
+        security.authorize(req,readDB(),verifyAuthToken);
+        if(req.path === '/api/auth/login') {
+          const key = req.socket.remoteAddress || 'local';
+          const now=Date.now();
+          for(const [ip,attempt] of loginAttempts) if(attempt.until<=now) loginAttempts.delete(ip);
+          const attempt=loginAttempts.get(key)||{count:0,until:now+60000};
+          if(attempt.count>=20) { res.setHeader('Retry-After','60'); domain.fail('Demasiados intentos. Espera un minuto.',429); }
+          attempt.count++; loginAttempts.set(key,attempt);
+        }
+        next();
+      } catch(error) { next(error); }
+    });
+  } catch(error) { next(error); }
+}));
 
 // Initial connection attempt
 connectDB();
@@ -342,16 +338,20 @@ function readLocalJSON() {
     const data = fs.readFileSync(DB_PATH, 'utf-8');
     return ensureDBShape(JSON.parse(data));
   } catch (err) {
-    console.error('Error reading database:', err);
-    return ensureDBShape({});
+    throw Object.assign(new Error('No se pudo leer la base de datos. No se sobrescribirá el archivo.'),{status:503,cause:err});
   }
 }
 
 function readDB() {
-  return cacheDB || readLocalJSON();
+  return requestState.getStore()?.db || cacheDB || readLocalJSON();
 }
 
 async function getDB() {
+  if(requestState.getStore()) return requestState.getStore().db;
+  if(process.env.AUREA_STORAGE!=='local' && process.env.MONGODB_URI?.trim()) {
+    await connectDB();
+    if(!isMongoConnected()) throw Object.assign(new Error('MongoDB no está disponible.'),{status:503});
+  }
   if (isMongoConnected()) {
     const now = Date.now();
     if (cacheDB && (now - lastCacheTime < CACHE_TTL_MS)) {
@@ -363,36 +363,29 @@ async function getDB() {
         cacheDB = ensureDBShape(state);
         lastCacheTime = now;
         try {
-          fs.writeFileSync(DB_PATH, JSON.stringify(cacheDB, null, 2), 'utf-8');
+          atomicWrite(cacheDB);
         } catch (e) {}
         return cacheDB;
       }
     } catch (err) {
-      console.warn('[DB] Error fetching from Atlas, using cache/local:', err.message);
+      throw Object.assign(new Error('No se pudo actualizar el estado de MongoDB.'),{status:503,cause:err});
     }
   }
   return cacheDB || readLocalJSON();
 }
 
 // Awaited, fully synchronized writeDB
+function atomicWrite(data) {
+  fs.mkdirSync(path.dirname(DB_PATH),{recursive:true});
+  const temporary = DB_PATH + '.' + crypto.randomUUID() + '.tmp';
+  try { fs.writeFileSync(temporary,JSON.stringify(data,null,2),'utf8'); fs.renameSync(temporary,DB_PATH); }
+  finally { if(fs.existsSync(temporary)) fs.unlinkSync(temporary); }
+}
 async function writeDB(data) {
   ensureDBShape(data);
-  cacheDB = data;
-  lastCacheTime = Date.now();
-
-  try {
-    fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2), 'utf-8');
-  } catch (err) {
-    console.warn('[DB] File write warning:', err.message);
-  }
-
-  if (isMongoConnected()) {
-    try {
-      await syncStateToMongo(data);
-    } catch (err) {
-      console.warn('⚠️ [Atlas Sync Warning]:', err.message);
-    }
-  }
+  if(isMongoConnected()) await syncStateToMongo(data);
+  atomicWrite(data);
+  cacheDB=structuredClone(data); lastCacheTime=Date.now();
   return true;
 }
 
@@ -431,6 +424,7 @@ async function syncStateToMongo(db) {
     if (Array.isArray(db.paymentMethods)) tasks.push(syncArrayCollection(models.PaymentMethod, db.paymentMethods));
     if (Array.isArray(db.cashMovements)) tasks.push(syncArrayCollection(models.CashMovement, db.cashMovements));
     if (Array.isArray(db.users)) tasks.push(syncArrayCollection(models.User, db.users));
+    if (Array.isArray(db.sessions)) tasks.push(syncArrayCollection(models.Session, db.sessions));
     if (db.roles) {
       const rolesArr = Array.isArray(db.roles) ? db.roles : Object.values(db.roles);
       tasks.push(syncArrayCollection(models.Role, rolesArr));
@@ -438,7 +432,7 @@ async function syncStateToMongo(db) {
 
     await Promise.all(tasks);
   } catch (err) {
-    console.warn('⚠️ [Atlas Sync Warning]:', err.message);
+    throw Object.assign(new Error('No se pudo guardar en MongoDB.'), {status:503,cause:err});
   }
 }
 
@@ -514,6 +508,8 @@ function calculateAverages(db) {
     totalVault18kCost: totalVaultCost
   };
 }
+
+const business = domain.business({getDB,writeDB,calculateAverages});
 
 // === API ROUTES ===
 
@@ -595,7 +591,7 @@ app.get('/api/rates', (req, res) => {
   });
 });
 
-app.post('/api/rates', async (req, res) => {
+app.post('/api/rates', asyncRoute(async (req,res) => {
   const db = await getDB();
   db.rates = db.rates || {};
   const { promedioPuro24k, promedioNacional, promedioItaliano, retal_oro18k_compra, resetOverrides } = req.body;
@@ -647,9 +643,9 @@ app.post('/api/rates', async (req, res) => {
     },
     message: 'Tasas actualizadas exitosamente.'
   });
-});
+}));
 
-app.put('/api/rates', async (req, res) => {
+app.put('/api/rates', asyncRoute(async (req,res) => {
   const db = await getDB();
   db.rates = db.rates || {};
   const { promedioPuro24k, promedioNacional, promedioItaliano, retal_oro18k_compra, resetOverrides } = req.body;
@@ -701,7 +697,7 @@ app.put('/api/rates', async (req, res) => {
     },
     message: 'Tasas actualizadas exitosamente.'
   });
-});
+}));
 
 // 3. Puro 24K Ledger & Maquila (Entregas y Recepciones con Talleres)
 app.get('/api/puro', (req, res) => {
@@ -715,11 +711,11 @@ app.get('/api/puro', (req, res) => {
 });
 
 // Registrar Compra de Puro 24K (Granalla/Lingotes)
-app.post('/api/puro/purchase', async (req, res) => {
+app.post('/api/puro/purchase', asyncRoute(async (req,res) => {
   const db = await getDB();
   if (!db.puro24k) db.puro24k = { stockGrams: 0, purchases: [], deliveries: [] };
 
-  const grams = Number(req.body.grams) || 0;
+  const grams = domain.grams(req.body.grams,'Peso comprado');
   const costPerGram = Number(req.body.costPerGram) || 0;
   const supplierId = req.body.supplierId || '';
   const supplier = db.suppliers.find(s => s.id === supplierId);
@@ -736,7 +732,7 @@ app.post('/api/puro/purchase', async (req, res) => {
     supplierName,
     grams,
     costPerGram,
-    totalCost: Math.round(grams * costPerGram),
+    totalCost: domain.money(grams * costPerGram),
     invoiceRef: req.body.invoiceRef || 'S/N',
     notes: req.body.notes || 'Compra de granalla 24k pura'
   };
@@ -747,14 +743,14 @@ app.post('/api/puro/purchase', async (req, res) => {
   await writeDB(db);
   const averages = calculateAverages(db);
   res.status(201).json({ success: true, purchase, newPuroStock: db.puro24k.stockGrams, newAverageCost: averages.promedioPuro24k });
-});
+}));
 
 // Registrar Entrega de Puro 24K a Taller / Proveedor
-app.post('/api/puro/deliver', async (req, res) => {
+app.post('/api/puro/deliver', asyncRoute(async (req,res) => {
   const db = await getDB();
   if (!db.puro24k) db.puro24k = { stockGrams: 0, purchases: [], deliveries: [] };
 
-  const grams24k = Number(req.body.grams24k) || 0;
+  const grams24k = domain.grams(req.body.grams24k,'Peso entregado');
   const supplierId = req.body.supplierId;
   const supplier = db.suppliers.find(s => s.id === supplierId);
 
@@ -791,10 +787,10 @@ app.post('/api/puro/deliver', async (req, res) => {
   await writeDB(db);
 
   res.status(201).json({ success: true, delivery: deliveryRecord, supplier });
-});
+}));
 
 // Registrar Recepción de Joyería Terminada de Taller (Cobra Mano de Obra)
-app.post('/api/puro/receive', async (req, res) => {
+app.post('/api/puro/receive', asyncRoute(async (req,res) => {
   const db = await getDB();
   const {
     supplierId,
@@ -812,9 +808,10 @@ app.post('/api/puro/receive', async (req, res) => {
   const supplier = db.suppliers.find(s => s.id === supplierId);
   if (!supplier) return res.status(404).json({ success: false, message: 'Proveedor / Taller no encontrado' });
 
-  const g18k = Number(grams18kReceived) || 0;
-  const g24kUsed = Number(grams24kUsed) || 0;
-  const moRate = Number(manoDeObraRate) || (Number(supplier.manoDeObraPerGram) || 22000);
+  const g18k = domain.grams(grams18kReceived,'Peso recibido');
+  const g24kUsed = domain.grams(grams24kUsed,'Puro consumido',true);
+  if(g24kUsed > (Number(supplier.puroInHandsGrams)||0)) domain.fail('El puro consumido supera el metal entregado a este taller.');
+  const moRate = Number(manoDeObraRate ?? supplier.manoDeObraPerGram ?? 22000);
 
   if (g18k <= 0) {
     return res.status(400).json({ success: false, message: 'Debe ingresar el peso en gramos recibido de joyería.' });
@@ -826,9 +823,10 @@ app.post('/api/puro/receive', async (req, res) => {
   }
 
   // Calculate Mano de Obra
-  const totalManoDeObra = Math.round(g18k * moRate);
+  const totalManoDeObra = domain.money(g18k * moRate);
+  const oldSupplierDebt=domain.supplierDebt(supplier);
   supplier.balanceManoDeObra = (Number(supplier.balanceManoDeObra) || 0) + totalManoDeObra;
-  supplier.balanceDuePesos = (Number(supplier.balanceDuePesos) || 0) + totalManoDeObra;
+  supplier.balanceDuePesos = oldSupplierDebt + totalManoDeObra;
 
   // Calculate actual cost per gram of the received 18K piece:
   // Metal cost in 18k = (Grams 24K * Average Cost 24K) / Grams 18K + Mano de obra
@@ -880,7 +878,7 @@ app.post('/api/puro/receive', async (req, res) => {
 
   await writeDB(db);
   res.status(201).json({ success: true, item: newItem, delivery: deliveryRecord, supplier });
-});
+}));
 
 // 4. Items (Prendas y Lotes por gramo - SIN conteo de piezas y SIN precio fijo de venta)
 app.get('/api/items', (req, res) => {
@@ -903,10 +901,12 @@ app.get('/api/items', (req, res) => {
   res.json({ success: true, items: list });
 });
 
-app.post('/api/items', async (req, res) => {
+app.post('/api/items', asyncRoute(async (req,res) => {
   const db = await getDB();
   const averages = calculateAverages(db);
 
+  if(req.body.code && db.items.some(item=>item.code===req.body.code)) domain.fail('Ya existe un lote con ese código.');
+  domain.grams(req.body.weightGrams,'Peso del lote');
   const category = req.body.category || 'italiano';
   const defaultCost = category === 'italiano' ? averages.promedioItaliano : averages.promedioNacional;
 
@@ -919,7 +919,7 @@ app.post('/api/items', async (req, res) => {
     purity: '18K (750)',
     origin: req.body.origin || (category === 'italiano' ? 'Vicenza, Italia' : 'Medellín, Colombia'),
     weightGrams: Math.max(0, Number(req.body.weightGrams) || 0),
-    costPerGram: Math.max(0, Number(req.body.costPerGram) || defaultCost),
+    costPerGram: Math.max(0, Number(req.body.costPerGram ?? defaultCost)),
     description: req.body.description || '',
     status: 'activo',
     dateAdded: new Date().toISOString().split('T')[0]
@@ -928,9 +928,10 @@ app.post('/api/items', async (req, res) => {
   db.items.unshift(newItem);
   await writeDB(db);
   res.status(201).json({ success: true, item: newItem });
-});
+}));
 
-app.put('/api/items/:id', async (req, res) => {
+app.put('/api/items/:id', asyncRoute(async (req,res) => {
+  req.body=Object.fromEntries(Object.entries(req.body).filter(([key])=>["code","name","category","subcategory","purity","origin","description","status","weightGrams","costPerGram"].includes(key)));
   const db = await getDB();
   const idx = db.items.findIndex(i => i.id === req.params.id);
   if (idx === -1) {
@@ -938,6 +939,7 @@ app.put('/api/items/:id', async (req, res) => {
   }
 
   const it = db.items[idx];
+  if(req.body.code && db.items.some(item=>item.id!==it.id&&item.code===req.body.code)) domain.fail('Ya existe otro lote con ese código.');
   db.items[idx] = {
     ...it,
     ...req.body,
@@ -953,14 +955,16 @@ app.put('/api/items/:id', async (req, res) => {
 
   await writeDB(db);
   res.json({ success: true, item: db.items[idx] });
-});
+}));
 
-app.delete('/api/items/:id', async (req, res) => {
+app.delete('/api/items/:id', asyncRoute(async (req,res) => {
   const db = await getDB();
+  if(!db.items.some(item=>item.id===req.params.id)) domain.fail('Lote no encontrado.',404);
+  if(db.orders.some(order=>order.items?.some(line=>line.itemId===req.params.id))) domain.fail('El lote tiene despachos asociados y debe conservarse para el historial.');
   db.items = db.items.filter(i => i.id !== req.params.id);
   await writeDB(db);
   res.json({ success: true, message: 'Lote retirado de inventario' });
-});
+}));
 
 // Helper for category slug generation
 function slugifyCategory(text) {
@@ -976,35 +980,12 @@ function slugifyCategory(text) {
 }
 
 // 4.1 Categories (Categorías dinámicas de prendas/lotes)
-app.get('/api/categories', async (req, res) => {
+app.get('/api/categories', asyncRoute(async (req,res) => {
   const db = await getDB();
-  if (!db.categories || !Array.isArray(db.categories) || db.categories.length === 0) {
-    db.categories = [
-      {
-        id: "cat-italiano",
-        name: "Oro Italiano 18K (750)",
-        slug: "italiano",
-        badgeText: "🇮🇹 Italiano 18K",
-        badgeClass: "badge-italian",
-        color: "#34d399",
-        description: "Cadenas y prendas importadas de Italia Ley 750"
-      },
-      {
-        id: "cat-nacional",
-        name: "Oro Nacional 18K",
-        slug: "nacional",
-        badgeText: "🇨🇴 Nacional 18K",
-        badgeClass: "badge-nacional",
-        color: "#fbbf24",
-        description: "Prendas vaciadas y manufacturadas en talleres colombianos"
-      }
-    ];
-    await writeDB(db);
-  }
-  res.json({ success: true, categories: db.categories });
-});
+  res.json({ success:true,categories:db.categories || [] });
+}));
 
-app.post('/api/categories', async (req, res) => {
+app.post('/api/categories', asyncRoute(async (req,res) => {
   const db = await getDB();
   db.categories = db.categories || [];
 
@@ -1036,9 +1017,9 @@ app.post('/api/categories', async (req, res) => {
   db.categories.push(newCat);
   await writeDB(db);
   res.status(201).json({ success: true, category: newCat });
-});
+}));
 
-app.put('/api/categories/:id', async (req, res) => {
+app.put('/api/categories/:id', asyncRoute(async (req,res) => {
   const db = await getDB();
   db.categories = db.categories || [];
   const idx = db.categories.findIndex(c => c.id === req.params.id);
@@ -1049,6 +1030,10 @@ app.put('/api/categories/:id', async (req, res) => {
   const oldSlug = db.categories[idx].slug;
   const newName = (req.body.name || db.categories[idx].name).trim();
   let newSlug = req.body.slug ? slugifyCategory(req.body.slug) : db.categories[idx].slug;
+  if(['nacional','italiano'].includes(oldSlug)&&newSlug!==oldSlug) domain.fail('El código de las categorías base no puede modificarse.');
+  if(!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(newSlug)) domain.fail('Código de categoría inválido.');
+  if(db.categories.some(category=>category.id!==req.params.id&&category.slug===newSlug)) domain.fail('El código de categoría ya existe.');
+  domain.text(newName,'Nombre de categoría',{required:true});
 
   // If slug changed, update items using old slug
   if (newSlug !== oldSlug) {
@@ -1073,9 +1058,9 @@ app.put('/api/categories/:id', async (req, res) => {
 
   await writeDB(db);
   res.json({ success: true, category: db.categories[idx] });
-});
+}));
 
-app.delete('/api/categories/:id', async (req, res) => {
+app.delete('/api/categories/:id', asyncRoute(async (req,res) => {
   const db = await getDB();
   db.categories = db.categories || [];
   const target = db.categories.find(c => c.id === req.params.id);
@@ -1107,7 +1092,7 @@ app.delete('/api/categories/:id', async (req, res) => {
     success: true, 
     message: `Categoría "${target.name}" eliminada correctamente.${reassignedCount > 0 ? ` ${reassignedCount} lotes reasignados a "${fallbackCat}".` : ''}` 
   });
-});
+}));
 
 // 5. Clients & Cuentas por Cobrar (CxC)
 app.get('/api/clients', (req, res) => {
@@ -1115,7 +1100,7 @@ app.get('/api/clients', (req, res) => {
   res.json({ success: true, clients: db.clients || [] });
 });
 
-app.post('/api/clients', async (req, res) => {
+app.post('/api/clients', asyncRoute(async (req,res) => {
   const db = await getDB();
   const tradeName = (req.body.tradeName || req.body.name || '').trim();
   const name = (req.body.name || tradeName).trim();
@@ -1132,8 +1117,8 @@ app.post('/api/clients', async (req, res) => {
     documentNumber: req.body.documentNumber || '',
     phone: req.body.phone || '',
     city: req.body.city || '',
-    creditLimitPesos: Number(req.body.creditLimitPesos) || 50000000,
-    creditLimitGrams: Number(req.body.creditLimitGrams) || 150,
+    creditLimitPesos: Number(req.body.creditLimitPesos ?? 50000000),
+    creditLimitGrams: Number(req.body.creditLimitGrams ?? 150),
     currentDebtPesos: 0,
     currentDebtGrams: 0,
     riskLevel: req.body.riskLevel || 'A - Excelente',
@@ -1144,9 +1129,10 @@ app.post('/api/clients', async (req, res) => {
   db.clients.unshift(newClient);
   await writeDB(db);
   res.status(201).json({ success: true, client: newClient });
-});
+}));
 
-app.put('/api/clients/:id', async (req, res) => {
+app.put('/api/clients/:id', asyncRoute(async (req,res) => {
+  req.body=Object.fromEntries(Object.entries(req.body).filter(([key])=>["name","tradeName","documentType","documentNumber","phone","city","riskLevel","status","creditLimitPesos","creditLimitGrams"].includes(key)));
   const db = await getDB();
   const idx = db.clients.findIndex(c => c.id === req.params.id);
   if (idx === -1) return res.status(404).json({ success: false, message: 'Joyería no encontrada' });
@@ -1165,9 +1151,9 @@ app.put('/api/clients/:id', async (req, res) => {
   };
   await writeDB(db);
   res.json({ success: true, client: db.clients[idx], message: 'Joyería actualizada correctamente' });
-});
+}));
 
-app.delete('/api/clients/:id', async (req, res) => {
+app.delete('/api/clients/:id', asyncRoute(async (req,res) => {
   const db = await getDB();
   const client = db.clients.find(c => c.id === req.params.id);
   if (!client) return res.status(404).json({ success: false, message: 'Joyería no encontrada' });
@@ -1179,10 +1165,11 @@ app.delete('/api/clients/:id', async (req, res) => {
     });
   }
 
+  if(db.orders.some(order=>order.clientId===req.params.id)||db.payments.some(payment=>payment.entityId===req.params.id)) domain.fail('El cliente tiene historial. Puedes inactivarlo para conservar sus registros.');
   db.clients = db.clients.filter(c => c.id !== req.params.id);
   await writeDB(db);
   res.json({ success: true, message: `Joyería "${client.tradeName || client.name}" eliminada correctamente` });
-});
+}));
 
 // 6. Suppliers & Cuentas por Pagar (CxP con Mano de Obra y Oro Puro en poder)
 app.get('/api/suppliers', (req, res) => {
@@ -1190,8 +1177,9 @@ app.get('/api/suppliers', (req, res) => {
   res.json({ success: true, suppliers: db.suppliers || [] });
 });
 
-app.post('/api/suppliers', async (req, res) => {
+app.post('/api/suppliers', asyncRoute(async (req,res) => {
   const db = await getDB();
+  domain.text(req.body.name,'Nombre del proveedor',{required:true});
   const newSupplier = {
     id: 'sup-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
     name: (req.body.name || '').trim(),
@@ -1199,7 +1187,7 @@ app.post('/api/suppliers', async (req, res) => {
     category: req.body.category || 'Taller Nacional / Vaciado',
     phone: req.body.phone || '',
     city: req.body.city || '',
-    manoDeObraPerGram: Number(req.body.manoDeObraPerGram) || 22000,
+    manoDeObraPerGram: Number(req.body.manoDeObraPerGram ?? 22000),
     puroInHandsGrams: 0,
     balanceManoDeObra: 0,
     balanceDuePesos: Number(req.body.balanceDuePesos) || 0,
@@ -1210,9 +1198,10 @@ app.post('/api/suppliers', async (req, res) => {
   db.suppliers.unshift(newSupplier);
   await writeDB(db);
   res.status(201).json({ success: true, supplier: newSupplier });
-});
+}));
 
-app.put('/api/suppliers/:id', async (req, res) => {
+app.put('/api/suppliers/:id', asyncRoute(async (req,res) => {
+  req.body=Object.fromEntries(Object.entries(req.body).filter(([key])=>["name","contact","category","phone","city","status","manoDeObraPerGram"].includes(key)));
   const db = await getDB();
   const idx = db.suppliers.findIndex(s => s.id === req.params.id);
   if (idx === -1) return res.status(404).json({ success: false, message: 'Proveedor no encontrado' });
@@ -1231,9 +1220,9 @@ app.put('/api/suppliers/:id', async (req, res) => {
   };
   await writeDB(db);
   res.json({ success: true, supplier: db.suppliers[idx], message: 'Proveedor actualizado correctamente' });
-});
+}));
 
-app.delete('/api/suppliers/:id', async (req, res) => {
+app.delete('/api/suppliers/:id', asyncRoute(async (req,res) => {
   const db = await getDB();
   const supplier = db.suppliers.find(s => s.id === req.params.id);
   if (!supplier) return res.status(404).json({ success: false, message: 'Proveedor no encontrado' });
@@ -1247,10 +1236,11 @@ app.delete('/api/suppliers/:id', async (req, res) => {
     });
   }
 
+  if(db.puro24k.deliveries.some(delivery=>delivery.supplierId===req.params.id)||db.puro24k.purchases.some(purchase=>purchase.supplierId===req.params.id)||db.payments.some(payment=>payment.entityId===req.params.id)) domain.fail('El proveedor tiene historial y debe conservarse.');
   db.suppliers = db.suppliers.filter(s => s.id !== req.params.id);
   await writeDB(db);
   res.json({ success: true, message: `Proveedor / Taller "${supplier.name}" eliminado correctamente` });
-});
+}));
 
 // 7. Orders / Despacho Mayorista (Precio acordado negociado en caliente al vender)
 app.get('/api/orders', (req, res) => {
@@ -1258,119 +1248,9 @@ app.get('/api/orders', (req, res) => {
   res.json({ success: true, orders: db.orders || [] });
 });
 
-app.post('/api/orders', async (req, res) => {
-  const db = await getDB();
-  const { clientId, items, paymentType, paymentDetail, notes } = req.body;
-
-  if (!items || !items.length) {
-    return res.status(400).json({ success: false, message: 'El despacho debe contener al menos una pesada.' });
-  }
-
-  const client = db.clients.find(c => c.id === clientId);
-  if (!client) {
-    return res.status(400).json({ success: false, message: 'Cliente mayorista no válido.' });
-  }
-
-  let totalGrams = 0;
-  let totalAmount = 0;
-  let totalCostAmount = 0;
-
-  const processedItems = items.map(line => {
-    const dbItem = db.items.find(i => i.id === line.itemId);
-    const weight = Number(line.weightGrams) || 0;
-    const pricePerGram = Number(line.pricePerGram) || 0; // Negotiated live at sale!
-    const costPerGram = dbItem ? Number(dbItem.costPerGram) || 0 : (Number(line.costPerGram) || 0);
-    const subtotal = Math.round(weight * pricePerGram);
-    const subtotalCost = Math.round(weight * costPerGram);
-
-    totalGrams += weight;
-    totalAmount += subtotal;
-    totalCostAmount += subtotalCost;
-
-    // Deduct weight from stock in vault
-    if (dbItem) {
-      dbItem.weightGrams = Math.max(0, Number((dbItem.weightGrams - weight).toFixed(2)));
-    }
-
-    return {
-      itemId: line.itemId,
-      code: line.code || (dbItem ? dbItem.code : 'GEN'),
-      name: line.name || (dbItem ? dbItem.name : 'Joyería'),
-      category: line.category || (dbItem ? dbItem.category : 'nacional'),
-      weightGrams: weight,
-      costPerGram: costPerGram,
-      pricePerGram: pricePerGram,
-      subtotal: subtotal,
-      marginPerGram: pricePerGram - costPerGram
-    };
-  });
-
-  const remisionNumber = `REM-2026-${String(db.orders.length + 101).padStart(3, '0')}`;
-  const now = new Date().toISOString();
-
-  const newOrder = {
-    id: 'ord-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
-    remisionNumber,
-    date: now,
-    clientId,
-    clientName: client.tradeName || client.name,
-    items: processedItems,
-    totalGrams: Number(totalGrams.toFixed(2)),
-    totalCostAmount,
-    totalAmount,
-    grossMargin: totalAmount - totalCostAmount,
-    paymentType: paymentType || 'Contado',
-    paymentDetail: paymentDetail || {
-      cash: totalAmount,
-      transfer: 0,
-      scrapGoldGrams: 0,
-      scrapGoldRate: 0,
-      scrapGoldAmount: 0,
-      creditAmount: 0
-    },
-    status: paymentType === 'Credito' ? 'Pendiente' : (paymentDetail && paymentDetail.creditAmount > 0 ? 'Parcial' : 'Pagado'),
-    notes: notes || 'Despacho generado desde Nexus por Mayor'
-  };
-
-  // Adjust client debt if Credit or Mixed
-  let creditPesos = 0;
-  if (paymentType === 'Credito') {
-    creditPesos = totalAmount;
-  } else if (paymentDetail && paymentDetail.creditAmount > 0) {
-    creditPesos = paymentDetail.creditAmount;
-  }
-
-  if (creditPesos > 0) {
-    client.currentDebtPesos = (Number(client.currentDebtPesos) || 0) + creditPesos;
-    const averages = calculateAverages(db);
-    const refRate = Number(averages.promedioNacional ?? 0);
-    client.currentDebtGrams = refRate > 0 ? Number((client.currentDebtPesos / refRate).toFixed(2)) : 0;
-  }
-
-  // Scrap gold / retal payment transaction
-  if (paymentDetail && paymentDetail.scrapGoldGrams > 0) {
-    const scrapPay = {
-      id: 'pay-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
-      type: 'abono_cxc',
-      entityId: client.id,
-      entityName: client.tradeName || client.name,
-      date: now,
-      amountPesos: paymentDetail.scrapGoldAmount,
-      scrapGoldGrams: paymentDetail.scrapGoldGrams,
-      scrapGoldRate: paymentDetail.scrapGoldRate,
-      scrapGoldEquivalent: paymentDetail.scrapGoldAmount,
-      paymentMethod: 'Retal de Oro 18K',
-      reference: `RETAL-DESPACHO-${remisionNumber}`,
-      notes: `Pago en retal: ${paymentDetail.scrapGoldGrams}g @ $${paymentDetail.scrapGoldRate.toLocaleString('es-CO')}/g en ${remisionNumber}`
-    };
-    db.payments.unshift(scrapPay);
-  }
-
-  db.orders.unshift(newOrder);
-  await writeDB(db);
-
-  res.status(201).json({ success: true, order: newOrder, client });
-});
+app.post('/api/orders', asyncRoute(async (req,res) => {
+  return business.order(req,res);
+}));
 
 // 8. Payments / Abonos (Cartera CxC y CxP)
 app.get('/api/payments', (req, res) => {
@@ -1378,189 +1258,23 @@ app.get('/api/payments', (req, res) => {
   res.json({ success: true, payments: db.payments || [] });
 });
 
-app.post('/api/payments', async (req, res) => {
-  const db = await getDB();
-  const {
-    type,
-    entityId,
-    amountPesos,
-    scrapGoldGrams,
-    scrapGoldRate,
-    paymentMethod,
-    reference,
-    notes
-  } = req.body;
-
-  const now = new Date().toISOString();
-  let totalDeduction = Number(amountPesos) || 0;
-  let scrapGrams = Number(scrapGoldGrams) || 0;
-  let scrapRate = Number(scrapGoldRate) || (db.rates.retal_oro18k_compra || 255000);
-  let scrapEquivalent = 0;
-
-  if (scrapGrams > 0) {
-    scrapEquivalent = Math.round(scrapGrams * scrapRate);
-    totalDeduction += scrapEquivalent;
-  }
-
-  let entityName = '';
-
-  if (type === 'abono_cxc') {
-    const client = db.clients.find(c => c.id === entityId);
-    if (!client) return res.status(404).json({ success: false, message: 'Cliente no encontrado' });
-    entityName = client.tradeName || client.name;
-
-    client.currentDebtPesos = Math.max(0, (Number(client.currentDebtPesos) || 0) - totalDeduction);
-    const averages = calculateAverages(db);
-    const refRate = Number(averages.promedioNacional ?? 0);
-    client.currentDebtGrams = refRate > 0 ? Number((client.currentDebtPesos / refRate).toFixed(2)) : 0;
-    client.lastPaymentDate = now.split('T')[0];
-  } else if (type === 'pago_cxp') {
-    const supplier = db.suppliers.find(s => s.id === entityId);
-    if (!supplier) return res.status(404).json({ success: false, message: 'Proveedor no encontrado' });
-    entityName = supplier.name;
-
-    supplier.balanceDuePesos = Math.max(0, (Number(supplier.balanceDuePesos) || 0) - totalDeduction);
-    // Also discount from Mano de obra if applicable
-    if (supplier.balanceManoDeObra > 0) {
-      supplier.balanceManoDeObra = Math.max(0, supplier.balanceManoDeObra - totalDeduction);
-    }
-    const averages = calculateAverages(db);
-    const refRate = Number(averages.promedioItaliano ?? 0);
-    supplier.balanceDueGrams = refRate > 0 ? Number((supplier.balanceDuePesos / refRate).toFixed(2)) : 0;
-  } else {
-    return res.status(400).json({ success: false, message: 'Tipo de pago no soportado' });
-  }
-
-  const newPayment = {
-    id: 'pay-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
-    type,
-    entityId,
-    entityName,
-    date: now,
-    amountPesos: Number(amountPesos) || 0,
-    scrapGoldGrams: scrapGrams,
-    scrapGoldRate: scrapRate,
-    scrapGoldEquivalent: scrapEquivalent,
-    totalCredited: totalDeduction,
-    paymentMethod: paymentMethod || 'Efectivo',
-    reference: reference || 'ABN-' + Date.now().toString().slice(-6),
-    notes: notes || ''
-  };
-
-  db.payments.unshift(newPayment);
-  await writeDB(db);
-
-  res.status(201).json({ success: true, payment: newPayment });
-});
+app.post('/api/payments', asyncRoute(async (req,res) => {
+  return business.payment(req,res);
+}));
 
 // 9. Payment Methods Management (Transferencia, Efectivo, Crédito, Retal de Oro, etc.)
-const DEFAULT_PAYMENT_METHODS = [
-  {
-    id: 'pm-bancolombia-cte',
-    name: 'Bancolombia Cuenta Corriente',
-    type: 'Transferencia',
-    bank: 'Bancolombia',
-    accountType: 'Corriente',
-    accountNumber: '458-99214-01',
-    accountHolder: 'Nexus Joyas Mayoristas S.A.S',
-    documentId: 'NIT 901.884.221-9',
-    creditDays: 0,
-    surchargePercent: 0,
-    instructions: 'Enviar soporte con el número de remisión al WhatsApp de tesorería (+57 300 900 8899). Verificación en línea.',
-    status: 'activo',
-    isDefault: true
-  },
-  {
-    id: 'pm-davivienda-aho',
-    name: 'Davivienda Cuenta de Ahorros',
-    type: 'Transferencia',
-    bank: 'Davivienda',
-    accountType: 'Ahorros',
-    accountNumber: '0089-7741-2309',
-    accountHolder: 'Nexus Joyas Mayoristas S.A.S',
-    documentId: 'NIT 901.884.221-9',
-    creditDays: 0,
-    surchargePercent: 0,
-    instructions: 'Transferencias interbancarias ACH o directas. Se valida antes del despacho del lote de joyería.',
-    status: 'activo',
-    isDefault: false
-  },
-  {
-    id: 'pm-efectivo-caja-boveda',
-    name: 'Efectivo en Caja Bóveda Principal (COP)',
-    type: 'Efectivo',
-    bank: 'Caja Central',
-    accountType: 'Efectivo Físico',
-    accountNumber: 'CAJA-01',
-    accountHolder: 'Caja Fuerte - Sede Central Mayorista',
-    documentId: '',
-    creditDays: 0,
-    surchargePercent: 0,
-    instructions: 'Pago físico en efectivo moneda legal colombiana al momento de pesar y retirar en mostrador blindado.',
-    status: 'activo',
-    isDefault: false
-  },
-  {
-    id: 'pm-credito-15d',
-    name: 'Crédito Mayorista (Plazo 15 Días)',
-    type: 'Credito',
-    bank: 'Cartera Directa',
-    accountType: 'Plazo Crédito',
-    accountNumber: 'PLAZO-15D',
-    accountHolder: 'Cartera Mayorista Nexus',
-    documentId: '',
-    creditDays: 15,
-    surchargePercent: 0,
-    instructions: 'Aplica para joyerías con cupo de crédito aprobado en su perfil. Vencimiento estricto a 15 días calendario.',
-    status: 'activo',
-    isDefault: false
-  },
-  {
-    id: 'pm-credito-30d',
-    name: 'Crédito Mayorista (Plazo 30 Días)',
-    type: 'Credito',
-    bank: 'Cartera Directa',
-    accountType: 'Plazo Extendido',
-    accountNumber: 'PLAZO-30D',
-    accountHolder: 'Cartera Preferencial Calificación A',
-    documentId: '',
-    creditDays: 30,
-    surchargePercent: 2,
-    instructions: 'Línea de crédito para joyerías calificación A. Recargo financiero acordado del 2% mensual.',
-    status: 'activo',
-    isDefault: false
-  },
-  {
-    id: 'pm-retal-oro18k',
-    name: 'Retal de Oro 18K (Pago en Metal Físico)',
-    type: 'Retal Oro',
-    bank: 'Metal Físico',
-    accountType: 'Oro Ley 750',
-    accountNumber: 'ORO-18K-RET',
-    accountHolder: 'Bóveda de Recibo & Fundición',
-    documentId: '',
-    creditDays: 0,
-    surchargePercent: 0,
-    instructions: 'Se recibe oro chatarra Ley 750 ensayado y pesado en balanza digital. Se liquida a la tasa oficial de retal del día.',
-    status: 'activo',
-    isDefault: false
-  }
-];
-
 function ensurePaymentMethods(db) {
-  if (!db.paymentMethods || !Array.isArray(db.paymentMethods) || db.paymentMethods.length === 0) {
-    db.paymentMethods = JSON.parse(JSON.stringify(DEFAULT_PAYMENT_METHODS));
-  }
+  if(!Array.isArray(db.paymentMethods)) db.paymentMethods=[];
   return db.paymentMethods;
 }
 
-app.get('/api/payment-methods', async (req, res) => {
+app.get('/api/payment-methods', asyncRoute(async (req,res) => {
   const db = await getDB();
   const paymentMethods = ensurePaymentMethods(db);
   res.json({ success: true, paymentMethods });
-});
+}));
 
-app.post('/api/payment-methods', async (req, res) => {
+app.post('/api/payment-methods', asyncRoute(async (req,res) => {
   const db = await getDB();
   ensurePaymentMethods(db);
 
@@ -1609,9 +1323,10 @@ app.post('/api/payment-methods', async (req, res) => {
   await writeDB(db);
 
   res.status(201).json({ success: true, paymentMethod: newMethod, message: 'Método de pago registrado exitosamente.' });
-});
+}));
 
-app.put('/api/payment-methods/:id', async (req, res) => {
+app.put('/api/payment-methods/:id', asyncRoute(async (req,res) => {
+  req.body=Object.fromEntries(Object.entries(req.body).filter(([key])=>["name","type","bank","accountType","accountNumber","accountHolder","documentId","creditDays","surchargePercent","instructions","status","isDefault"].includes(key)));
   const db = await getDB();
   ensurePaymentMethods(db);
 
@@ -1642,9 +1357,9 @@ app.put('/api/payment-methods/:id', async (req, res) => {
 
   await writeDB(db);
   res.json({ success: true, paymentMethod: db.paymentMethods[idx], message: 'Método de pago actualizado exitosamente.' });
-});
+}));
 
-app.patch('/api/payment-methods/:id/toggle', async (req, res) => {
+app.patch('/api/payment-methods/:id/toggle', asyncRoute(async (req,res) => {
   const db = await getDB();
   ensurePaymentMethods(db);
 
@@ -1657,9 +1372,9 @@ app.patch('/api/payment-methods/:id/toggle', async (req, res) => {
   await writeDB(db);
 
   res.json({ success: true, paymentMethod: method, message: `Método ${method.name} marcado como ${method.status}.` });
-});
+}));
 
-app.delete('/api/payment-methods/:id', async (req, res) => {
+app.delete('/api/payment-methods/:id', asyncRoute(async (req,res) => {
   const db = await getDB();
   ensurePaymentMethods(db);
 
@@ -1677,7 +1392,7 @@ app.delete('/api/payment-methods/:id', async (req, res) => {
   await writeDB(db);
 
   res.json({ success: true, message: `Método de pago "${method.name}" eliminado correctamente.` });
-});
+}));
 
 // 10. Cuadre de Caja & Arqueo de Flujo de Fondos (Entradas, Salidas, Proveedores y Créditos)
 function compileCashLedger(db) {
@@ -1761,45 +1476,15 @@ function compileCashLedger(db) {
     }
   });
 
-  // Payments (Abonos CxC and Pagos CxP)
-  (db.payments || []).forEach(pay => {
-    // If this payment was auto-generated from a dispatch retal transaction,
-    // it is already accounted for in the order's retal portion in ledger to prevent double counting.
-    if (pay.reference && pay.reference.startsWith('RETAL-DESPACHO-')) {
-      return;
-    }
-
-    if (pay.type === 'abono_cxc') {
-      ledger.push({
-        id: pay.id,
-        sourceId: pay.id,
-        date: pay.date,
-        type: 'ingreso',
-        category: 'Abono Cartera Mayorista (CxC)',
-        entityType: 'cliente',
-        entityName: pay.entityName || 'Cliente Mayorista',
-        method: pay.paymentMethod || 'Efectivo en Caja Bóveda Principal (COP)',
-        reference: pay.reference || 'ABN',
-        description: pay.notes || `Abono de cartera recibido de ${pay.entityName || 'cliente'}`,
-        amount: Number(pay.totalCredited || pay.amountPesos) || 0,
-        scrapGrams: Number(pay.scrapGoldGrams) || 0
-      });
-    } else if (pay.type === 'pago_cxp') {
-      ledger.push({
-        id: pay.id,
-        sourceId: pay.id,
-        date: pay.date,
-        type: 'egreso',
-        category: 'Pago a Proveedor / Taller (CxP)',
-        entityType: 'proveedor',
-        entityName: pay.entityName || 'Proveedor',
-        method: pay.paymentMethod || 'Bancolombia Cuenta Corriente',
-        reference: pay.reference || 'PGO',
-        description: pay.notes || `Pago de mano de obra / liquidación a ${pay.entityName || 'proveedor'}`,
-        amount: Number(pay.totalCredited || pay.amountPesos) || 0,
-        scrapGrams: 0
-      });
-    }
+  // Split money and physical metal: a mixed payment is never all bank cash.
+  (db.payments || []).filter(pay=>!domain.isDispatchRetal(pay)).forEach(pay=>{
+    if(!['abono_cxc','pago_cxp'].includes(pay.type)) return;
+    const received=pay.type==='abono_cxc';
+    const base={sourceId:pay.id,date:pay.date,type:received?'ingreso':'egreso',category:received?'Abono Cartera Mayorista (CxC)':'Pago a Proveedor / Taller (CxP)',entityType:received?'cliente':'proveedor',entityName:pay.entityName||'',reference:pay.reference||'',description:pay.notes||'Abono registrado'};
+    const cash=Number(pay.amountPesos)||0;
+    const scrap=Number(pay.scrapGoldGrams ?? pay.scrapGrams)||0;
+    if(cash>0) ledger.push({...base,id:pay.id+'-money',method:/retal|mixto/i.test(pay.paymentMethod||'')?'Efectivo en Caja Bóveda Principal (COP)':pay.paymentMethod||'Efectivo en Caja Bóveda Principal (COP)',amount:cash,scrapGrams:0});
+    if(scrap>0) ledger.push({...base,id:pay.id+'-metal',method:'Retal de Oro 18K (Pago en Metal Físico)',amount:Number(pay.scrapGoldEquivalent)||Math.round(scrap*Number(pay.scrapGoldRate||0)),scrapGrams:scrap});
   });
 
   // Purchases of Puro 24K (Granalla/Lingotes)
@@ -1855,7 +1540,8 @@ function compileCashLedger(db) {
   return ledger;
 }
 
-function getLocalDateString(dateInput) {
+const getLocalDateString = domain.dateKey;
+function legacyDateString(dateInput) {
   if (!dateInput) {
     const now = new Date();
     return now.toLocaleDateString('en-CA');
@@ -1885,20 +1571,7 @@ app.get('/api/cuadre-caja', (req, res) => {
 
   let filtered = [...allLedger];
 
-  if (period === 'hoy') {
-    filtered = filtered.filter(item => getLocalDateString(item.date) === todayStr);
-  } else if (period === 'ayer') {
-    filtered = filtered.filter(item => getLocalDateString(item.date) === yesterdayStr);
-  } else if (period === 'semana') {
-    filtered = filtered.filter(item => item.date >= sevenDaysAgo);
-  } else if (period === 'mes') {
-    filtered = filtered.filter(item => getLocalDateString(item.date).startsWith(monthPrefix));
-  } else if (period === 'custom' && startDate && endDate) {
-    filtered = filtered.filter(item => {
-      const itemDate = getLocalDateString(item.date);
-      return itemDate >= startDate && itemDate <= endDate;
-    });
-  }
+  filtered=domain.filterPeriod(filtered,period,startDate,endDate);
 
   if (method && method !== 'all') {
     filtered = filtered.filter(item => (item.method || '').toLowerCase().includes(method.toLowerCase()));
@@ -2010,7 +1683,7 @@ app.get('/api/cuadre-caja', (req, res) => {
   });
 });
 
-app.post('/api/cash-movements', async (req, res) => {
+app.post('/api/cash-movements', asyncRoute(async (req,res) => {
   const db = await getDB();
   if (!db.cashMovements) db.cashMovements = [];
 
@@ -2021,7 +1694,7 @@ app.post('/api/cash-movements', async (req, res) => {
 
   const mov = {
     id: 'mov-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
-    date: date || new Date().toISOString(),
+    date: date ? (/^\d{4}-\d{2}-\d{2}$/.test(date) ? date+'T00:00:00-05:00' : date) : new Date().toISOString(),
     type: type || 'egreso',
     category: category || (type === 'ingreso' ? 'Ingreso Extraordinario' : 'Gasto Operativo'),
     concept: concept.trim(),
@@ -2035,9 +1708,9 @@ app.post('/api/cash-movements', async (req, res) => {
   await writeDB(db);
 
   res.status(201).json({ success: true, movement: mov, message: 'Movimiento de caja registrado exitosamente.' });
-});
+}));
 
-app.delete('/api/cash-movements/:id', async (req, res) => {
+app.delete('/api/cash-movements/:id', asyncRoute(async (req,res) => {
   const db = await getDB();
   if (!db.cashMovements) db.cashMovements = [];
 
@@ -2050,7 +1723,7 @@ app.delete('/api/cash-movements/:id', async (req, res) => {
   await writeDB(db);
 
   res.json({ success: true, message: 'Movimiento de caja eliminado.' });
-});
+}));
 
 // === MÓDULO DE GASTOS OPERATIVOS (OPEX) ===
 app.get('/api/gastos-operativos', (req, res) => {
@@ -2076,24 +1749,7 @@ app.get('/api/gastos-operativos', (req, res) => {
   const prevMonthPrefix = getLocalDateString(prevMonthDate).slice(0, 7);
   const yearPrefix = todayStr.slice(0, 4);
 
-  if (period === 'hoy') {
-    expenses = expenses.filter(item => getLocalDateString(item.date) === todayStr);
-  } else if (period === 'ayer') {
-    expenses = expenses.filter(item => getLocalDateString(item.date) === yesterdayStr);
-  } else if (period === 'semana') {
-    expenses = expenses.filter(item => item.date >= sevenDaysAgo);
-  } else if (period === 'mes') {
-    expenses = expenses.filter(item => getLocalDateString(item.date).startsWith(monthPrefix));
-  } else if (period === 'mes_anterior') {
-    expenses = expenses.filter(item => getLocalDateString(item.date).startsWith(prevMonthPrefix));
-  } else if (period === 'ano') {
-    expenses = expenses.filter(item => getLocalDateString(item.date).startsWith(yearPrefix));
-  } else if (period === 'custom' && startDate && endDate) {
-    expenses = expenses.filter(item => {
-      const d = getLocalDateString(item.date);
-      return d >= startDate && d <= endDate;
-    });
-  }
+  expenses=domain.filterPeriod(expenses,period,startDate,endDate);
 
   if (category && category !== 'all') {
     expenses = expenses.filter(item => (item.category || '').toLowerCase() === category.toLowerCase());
@@ -2169,22 +1825,13 @@ app.get('/api/gastos-operativos', (req, res) => {
   // Top category
   const topCategory = categoryBreakdown[0] || { category: 'Sin gastos', amount: 0, percentage: 0, color: '#64748b', icon: '🧾' };
 
-  // Calculate Average Daily Spend
-  let daysCount = 30;
-  if (period === 'hoy' || period === 'ayer') daysCount = 1;
-  else if (period === 'semana') daysCount = 7;
-  else if (period === 'mes' || period === 'mes_anterior') daysCount = 30;
-  else if (period === 'ano') daysCount = 365;
-  else if (period === 'custom' && startDate && endDate) {
-    const d1 = new Date(startDate);
-    const d2 = new Date(endDate);
-    daysCount = Math.max(1, Math.round((d2 - d1) / (1000 * 60 * 60 * 24)) + 1);
-  }
+  const bounds=domain.periodBounds(period,startDate,endDate);
+  const daysCount=bounds?Math.round((new Date(bounds[1]+'T12:00:00Z')-new Date(bounds[0]+'T12:00:00Z'))/86400000)+1:Math.max(1,expenses.length?Math.round((Date.now()-new Date(expenses.at(-1).date))/86400000)+1:1);
   const averageDaily = Math.round(totalExpenses / daysCount);
 
   // OPEX / Sales ratio
   const orders = db.orders || [];
-  const totalSales = orders.reduce((acc, o) => acc + (Number(o.totalAmount) || 0), 0);
+  const totalSales = domain.filterPeriod(orders,period,startDate,endDate).reduce((acc, o) => acc + (Number(o.totalAmount) || 0), 0);
   const opexToSalesRatio = totalSales > 0 ? Number(((totalExpenses / totalSales) * 100).toFixed(1)) : 0;
 
   res.json({
@@ -2204,18 +1851,19 @@ app.get('/api/gastos-operativos', (req, res) => {
   });
 });
 
-app.post('/api/gastos-operativos', async (req, res) => {
+app.post('/api/gastos-operativos', asyncRoute(async (req,res) => {
   const db = await getDB();
   if (!db.cashMovements) db.cashMovements = [];
 
   const { date, category, concept, amount, method, reference, beneficiary, notes } = req.body;
+  domain.text(concept,'Concepto',{required:true});
   if (!concept || !amount || Number(amount) <= 0) {
     return res.status(400).json({ success: false, message: 'Concepto y monto válido mayor a cero son obligatorios.' });
   }
 
   const newExpense = {
     id: 'exp-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
-    date: date || new Date().toISOString(),
+    date: date ? (/^\d{4}-\d{2}-\d{2}$/.test(date) ? date+'T00:00:00-05:00' : date) : new Date().toISOString(),
     type: 'egreso',
     category: category || 'Gastos Varios & Caja Menor',
     concept: concept.trim(),
@@ -2231,9 +1879,10 @@ app.post('/api/gastos-operativos', async (req, res) => {
   await writeDB(db);
 
   res.status(201).json({ success: true, expense: newExpense, message: 'Gasto operativo registrado exitosamente.' });
-});
+}));
 
-app.put('/api/gastos-operativos/:id', async (req, res) => {
+app.put('/api/gastos-operativos/:id', asyncRoute(async (req,res) => {
+  req.body=Object.fromEntries(Object.entries(req.body).filter(([key])=>["date","category","concept","amount","method","reference","beneficiary","notes"].includes(key)));
   const db = await getDB();
   if (!db.cashMovements) db.cashMovements = [];
 
@@ -2250,6 +1899,7 @@ app.put('/api/gastos-operativos/:id', async (req, res) => {
   }
 
   const existing = db.cashMovements[idx];
+  if(existing.type!=='egreso') domain.fail('Este movimiento no es un gasto.');
   db.cashMovements[idx] = {
     ...existing,
     ...req.body,
@@ -2267,9 +1917,9 @@ app.put('/api/gastos-operativos/:id', async (req, res) => {
 
   await writeDB(db);
   res.json({ success: true, expense: db.cashMovements[idx], message: 'Gasto operativo actualizado exitosamente.' });
-});
+}));
 
-app.delete('/api/gastos-operativos/:id', async (req, res) => {
+app.delete('/api/gastos-operativos/:id', asyncRoute(async (req,res) => {
   const db = await getDB();
   if (!db.cashMovements) db.cashMovements = [];
 
@@ -2278,11 +1928,12 @@ app.delete('/api/gastos-operativos/:id', async (req, res) => {
     return res.status(404).json({ success: false, message: 'Gasto no encontrado.' });
   }
 
+  if(exp.type!=='egreso') domain.fail('Este movimiento no es un gasto.');
   db.cashMovements = db.cashMovements.filter(m => m.id !== req.params.id);
   await writeDB(db);
 
   res.json({ success: true, message: 'Gasto operativo eliminado correctamente.' });
-});
+}));
 
 // === Balance General Financiero & Estado Patrimonial ===
 app.get('/api/balance-general', (req, res) => {
@@ -2360,7 +2011,7 @@ app.get('/api/balance-general', (req, res) => {
 
   // Retal de Oro 18K en Bóveda
   const payments = db.payments || [];
-  const retalPaymentsGrams = payments.filter(p => p.type === 'retal_18k' || p.scrapGrams > 0).reduce((acc, p) => acc + (Number(p.scrapGrams) || 0), 0);
+  const retalPaymentsGrams = domain.retalStock(db);
   const retalValuation = Math.round(retalPaymentsGrams * retalRate);
 
   const inventorySummary = {
@@ -2379,18 +2030,18 @@ app.get('/api/balance-general', (req, res) => {
   const totalAssetsPuroGramsEq = puroBenchmark > 0 ? Number((totalAssets / puroBenchmark).toFixed(2)) : 0;
 
   // 4. PASIVOS (Cuentas por Pagar Proveedores & Manos de Obra Talleres)
-  const totalPayablesPesos = suppliers.reduce((acc, s) => acc + (Number(s.balanceDuePesos) || 0), 0);
+  const totalPayablesPesos = suppliers.reduce((acc, s) => acc + Math.max(0,domain.supplierDebt(s)-(Number(s.balanceManoDeObra)||0)), 0);
   const totalManoDeObraDue = suppliers.reduce((acc, s) => acc + (Number(s.balanceManoDeObra) || 0), 0);
-  const totalLiabilities = totalPayablesPesos + totalManoDeObraDue;
+  const totalLiabilities = suppliers.reduce((sum,supplier)=>sum+domain.supplierDebt(supplier),0);
 
   const creditorsList = suppliers.filter(s => (Number(s.balanceDuePesos) || 0) > 0 || (Number(s.balanceManoDeObra) || 0) > 0).map(s => ({
     id: s.id,
     name: s.name,
     category: s.category,
-    balanceDuePesos: Number(s.balanceDuePesos) || 0,
+    balanceDuePesos: Math.max(0,domain.supplierDebt(s)-(Number(s.balanceManoDeObra)||0)),
     balanceManoDeObra: Number(s.balanceManoDeObra) || 0,
     puroInHandsGrams: Number(s.puroInHandsGrams) || 0,
-    totalOwed: (Number(s.balanceDuePesos) || 0) + (Number(s.balanceManoDeObra) || 0)
+    totalOwed: domain.supplierDebt(s)
   })).sort((a, b) => b.totalOwed - a.totalOwed);
 
   // 5. PATRIMONIO NETO / CAPITAL CONTABLE (Activo - Pasivo)
@@ -2468,7 +2119,7 @@ app.get('/api/balance-general', (req, res) => {
 // =========================================================
 
 // 1. Login Endpoint
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', asyncRoute(async (req,res) => {
   const db = await getDB();
   const { username, password } = req.body;
 
@@ -2492,8 +2143,7 @@ app.post('/api/auth/login', async (req, res) => {
   }
 
   // Password verification: checks regular hash OR master fallback for superadmin
-  const isValid = verifyPassword(password, user.passwordHash, user.salt) ||
-    (user.role === 'superadmin' && (password === 'nexus2026!' || password === 'admin123'));
+  const isValid = verifyPassword(password, user.passwordHash, user.salt);
 
   if (!isValid) {
     return res.status(401).json({ success: false, message: 'Contraseña incorrecta. Verifica tus credenciales.' });
@@ -2501,6 +2151,9 @@ app.post('/api/auth/login', async (req, res) => {
 
   const roleData = (db.roles && db.roles[user.role]) || DEFAULT_ROLES[user.role] || DEFAULT_ROLES.comercial;
   const token = createAuthToken(user, roleData);
+  db.sessions=db.sessions.filter(session=>session.expiresAt>Date.now());
+  db.sessions.push({id:tokenHash(token),userId:user.id,expiresAt:Date.now()+30*24*60*60*1000});
+  if(!user.passwordHash.startsWith('pbkdf2$')) {const upgraded=hashPassword(password);user.passwordHash=upgraded.hash;user.salt=upgraded.salt;}
 
   user.lastLogin = new Date().toISOString();
   await writeDB(db);
@@ -2539,10 +2192,10 @@ app.post('/api/auth/login', async (req, res) => {
     permissions: roleData.permissions || {},
     roles: db.roles || DEFAULT_ROLES
   });
-});
+}));
 
 // 2. Validate current session / user profile
-app.get('/api/auth/me', async (req, res) => {
+app.get('/api/auth/me', asyncRoute(async (req,res) => {
   const db = await getDB();
   const authHeader = req.headers.authorization || req.headers['x-auth-token'] || req.query.token;
   const token = authHeader ? authHeader.replace(/^Bearer\s+/i, '').trim() : null;
@@ -2578,17 +2231,16 @@ app.get('/api/auth/me', async (req, res) => {
     permissions: roleData.permissions || {},
     roles: db.roles || DEFAULT_ROLES
   });
-});
+}));
 
 // 3. Logout
-app.post('/api/auth/logout', (req, res) => {
-  const authHeader = req.headers.authorization || req.headers['x-auth-token'] || req.body.token;
-  const token = authHeader ? authHeader.replace(/^Bearer\s+/i, '').trim() : null;
-  if (token && activeSessions.has(token)) {
-    activeSessions.delete(token);
-  }
-  res.json({ success: true, message: 'Sesión cerrada correctamente.' });
-});
+app.post('/api/auth/logout', asyncRoute(async (req,res) => {
+  const db=await getDB();
+  db.sessions=db.sessions.filter(session=>session.id!==tokenHash(req.authToken));
+  activeSessions.delete(req.authToken);
+  await writeDB(db);
+  res.json({success:true,message:'Sesión cerrada correctamente.'});
+}));
 
 // 4. Users CRUD
 app.get('/api/users', (req, res) => {
@@ -2607,7 +2259,7 @@ app.get('/api/users', (req, res) => {
   res.json({ success: true, users, roles: db.roles || DEFAULT_ROLES });
 });
 
-app.post('/api/users', async (req, res) => {
+app.post('/api/users', asyncRoute(async (req,res) => {
   const db = await getDB();
   const { name, username, email, role, password, phone, status } = req.body;
 
@@ -2630,6 +2282,7 @@ app.post('/api/users', async (req, res) => {
     return res.status(400).json({ success: false, message: `El usuario "${username}" ya está registrado.` });
   }
 
+  if(email && db.users.some(user=>user.email?.toLowerCase()===email.trim().toLowerCase())) domain.fail('El correo ya está registrado.');
   const { hash, salt } = hashPassword(password);
   const newUser = {
     id: 'usr-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
@@ -2662,9 +2315,9 @@ app.post('/api/users', async (req, res) => {
       createdAt: newUser.createdAt
     }
   });
-});
+}));
 
-app.put('/api/users/:id', async (req, res) => {
+app.put('/api/users/:id', asyncRoute(async (req,res) => {
   const db = await getDB();
   const { id } = req.params;
   const idx = db.users.findIndex(u => u.id === id);
@@ -2687,7 +2340,8 @@ app.put('/api/users/:id', async (req, res) => {
   }
 
   if (req.body.name) current.name = req.body.name.trim();
-  if (req.body.email !== undefined) current.email = req.body.email.trim();
+  if(req.body.email && db.users.some(user=>user.id!==id&&user.email?.toLowerCase()===req.body.email.trim().toLowerCase())) domain.fail('El correo ya está registrado.');
+  if (req.body.email !== undefined) current.email = req.body.email.trim().toLowerCase();
   if (req.body.phone !== undefined) current.phone = req.body.phone.trim();
   if (req.body.status && current.role !== 'superadmin') {
     current.status = req.body.status;
@@ -2709,10 +2363,12 @@ app.put('/api/users/:id', async (req, res) => {
   }
 
   // Update password if provided
-  if (req.body.password && req.body.password.trim().length >= 4) {
-    const { hash, salt } = hashPassword(req.body.password.trim());
+  if(req.body.password !== undefined && req.body.password.length < 4) domain.fail('La contraseña debe tener mínimo 4 caracteres.');
+  if (req.body.password) {
+    const { hash, salt } = hashPassword(req.body.password);
     current.passwordHash = hash;
     current.salt = salt;
+    db.sessions=db.sessions.filter(session=>session.userId!==current.id);
   }
 
   await writeDB(db);
@@ -2730,9 +2386,9 @@ app.put('/api/users/:id', async (req, res) => {
       phone: current.phone
     }
   });
-});
+}));
 
-app.delete('/api/users/:id', async (req, res) => {
+app.delete('/api/users/:id', asyncRoute(async (req,res) => {
   const db = await getDB();
   const { id } = req.params;
   const user = db.users.find(u => u.id === id);
@@ -2752,7 +2408,7 @@ app.delete('/api/users/:id', async (req, res) => {
   await writeDB(db);
 
   res.json({ success: true, message: `Usuario "${user.name}" eliminado correctamente.` });
-});
+}));
 
 // 5. Roles & Permissions Matrix
 app.get('/api/roles', (req, res) => {
@@ -2780,7 +2436,7 @@ app.get('/api/roles', (req, res) => {
   });
 });
 
-app.put('/api/roles', async (req, res) => {
+app.put('/api/roles', asyncRoute(async (req,res) => {
   const db = await getDB();
   const { roles } = req.body;
 
@@ -2788,6 +2444,19 @@ app.put('/api/roles', async (req, res) => {
     return res.status(400).json({ success: false, message: 'Estructura de roles inválida.' });
   }
 
+  domain.object(roles,'Roles');
+  for(const [roleKey,role] of Object.entries(roles)) {
+    if(!Object.hasOwn(DEFAULT_ROLES,roleKey)) domain.fail('Rol desconocido.');
+    domain.object(role,'Rol'); domain.object(role.permissions,'Permisos');
+    for(const [module,permissions] of Object.entries(role.permissions)) {
+      if(!Object.hasOwn(DEFAULT_ROLES.superadmin.permissions,module)) domain.fail('Módulo desconocido.');
+      domain.object(permissions,'Permisos del módulo');
+      for(const [action,enabled] of Object.entries(permissions)) if(!['canView','canEdit','canDelete','canExport'].includes(action)||typeof enabled!=='boolean') domain.fail('Los permisos deben ser booleanos.');
+    }
+    if(role.color!==undefined&&!/^#[a-f\d]{6}$/i.test(role.color)) domain.fail('Color de rol inválido.');
+    if(role.name!==undefined) domain.text(role.name,'Nombre del rol',{required:true});
+    if(role.description!==undefined) domain.text(role.description,'Descripción del rol');
+  }
   Object.keys(roles).forEach(rKey => {
     if (db.roles[rKey]) {
       if (rKey === 'superadmin') {
@@ -2811,7 +2480,9 @@ app.put('/api/roles', async (req, res) => {
   }
 
   res.json({ success: true, message: 'Matriz de permisos actualizada exitosamente.', roles: db.roles });
-});
+}));
+
+app.use('/api',(req,res)=>res.status(404).json({success:false,message:'Ruta no encontrada.'}));
 
 // Global Error Handler Middleware
 app.use((err, req, res, next) => {
@@ -2819,9 +2490,10 @@ app.use((err, req, res, next) => {
   if (res.headersSent) {
     return next(err);
   }
-  res.status(500).json({
+  const status=err.status || (err.type==='entity.parse.failed'?400:500);
+  res.status(status).json({
     success: false,
-    message: 'Error interno en el servidor.',
+    message: status<500 ? err.message : 'No se pudo completar la operación. Intenta nuevamente.',
     error: process.env.NODE_ENV === 'development' ? err.message : undefined
   });
 });
@@ -2833,7 +2505,7 @@ app.use((req, res) => {
 
 if (require.main === module && !process.env.VERCEL) {
   app.listen(PORT, () => {
-    console.log(`💎 Nexus por Mayor Server ejecutándose en http://localhost:${PORT}`);
+    console.log(`💎 Áurea Mayoristas ejecutándose en http://localhost:${PORT}`);
   });
 }
 

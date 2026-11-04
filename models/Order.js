@@ -33,6 +33,9 @@ const OrderSchema = new mongoose.Schema({
     creditAmount: { type: Number, default: 0 }
   },
   status: { type: String, default: 'Pagado' },
+  outstandingAmount: { type: Number, default: undefined },
+  idempotencyKey: { type: String, default: undefined },
+  requestFingerprint: { type: String, default: undefined },
   notes: { type: String, default: '' }
 }, { timestamps: true });
 

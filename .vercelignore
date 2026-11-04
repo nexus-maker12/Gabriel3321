@@ -1,4 +1,6 @@
 .git
+data/database.json
+respaldos-aurea/
 .env
 .env.local
 .env.*.local

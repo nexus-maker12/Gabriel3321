@@ -1,9 +1,3 @@
-const dns = require('dns');
-try {
-  dns.setServers(['8.8.8.8', '1.1.1.1']);
-} catch (e) {
-  // Fallback to default system DNS
-}
 const mongoose = require('mongoose');
 const fs = require('fs');
 const path = require('path');
@@ -12,11 +6,9 @@ const models = require('../models');
 let isConnected = false;
 const isVercel = Boolean(process.env.VERCEL);
 const ORIGINAL_DB_PATH = path.join(__dirname, '..', 'data', 'database.json');
-const DB_PATH = isVercel
-  ? path.join('/tmp', 'database.json')
-  : ORIGINAL_DB_PATH;
+const DB_PATH = process.env.AUREA_DATA_FILE ? path.resolve(process.env.AUREA_DATA_FILE) : (isVercel ? path.join('/tmp','database.json') : ORIGINAL_DB_PATH);
 
-if (isVercel) {
+if (isVercel && !process.env.AUREA_DATA_FILE) {
   try {
     if (!fs.existsSync(DB_PATH) && fs.existsSync(ORIGINAL_DB_PATH)) {
       fs.copyFileSync(ORIGINAL_DB_PATH, DB_PATH);
@@ -26,10 +18,20 @@ if (isVercel) {
   }
 }
 
-const DEFAULT_MONGO_URI = 'mongodb+srv://nexuspormayor_db_user:KZ1IjSXIVR2RlTjC@cluster0.0jh50eq.mongodb.net/nexus_por_mayor?retryWrites=true&w=majority';
+let connecting = null;
+let lastAttempt = 0;
 
 async function connectDB() {
-  const uri = process.env.MONGODB_URI || DEFAULT_MONGO_URI;
+  if(process.env.AUREA_STORAGE==='local' || !process.env.MONGODB_URI?.trim()) return false;
+  if(connecting) return connecting;
+  if(isMongoConnected()) return true;
+  if(Date.now()-lastAttempt < 60000) return false;
+  lastAttempt=Date.now();
+  connecting=attemptConnection().finally(()=>{connecting=null;});
+  return connecting;
+}
+async function attemptConnection() {
+  const uri = process.env.MONGODB_URI;
 
   if (!uri || uri.trim() === '') {
     console.log('ℹ️  [DB] No se detectó MONGODB_URI. Operando con almacenamiento local: data/database.json');
@@ -53,7 +55,7 @@ async function connectDB() {
     return true;
   } catch (err) {
     console.warn('⚠️  [DB] Error conectando a MongoDB Atlas:', err.message);
-    console.warn('ℹ️  [DB] Continuando en modo fallback con data/database.json...');
+    console.warn('[DB] La conexión no está disponible. Las escrituras remotas se mantienen bloqueadas.');
     isConnected = false;
     return false;
   }
@@ -151,20 +153,21 @@ async function fetchStateFromMongo() {
   try {
     const [
       rates, items, clients, suppliers, orders, payments,
-      categories, paymentMethods, cashMovements, puro24k, users, roles
+      categories, paymentMethods, cashMovements, puro24k, users, roles, sessions
     ] = await Promise.all([
       models.Rates.findOne().lean(),
       models.Item.find().lean(),
       models.Client.find().lean(),
       models.Supplier.find().lean(),
-      models.Order.find().lean(),
-      models.Payment.find().lean(),
+      models.Order.find().sort({date:-1}).lean(),
+      models.Payment.find().sort({date:-1}).lean(),
       models.Category.find().lean(),
       models.PaymentMethod.find().lean(),
-      models.CashMovement.find().lean(),
+      models.CashMovement.find().sort({date:-1}).lean(),
       models.Puro24k.findOne().lean(),
       models.User.find().lean(),
-      models.Role.find().lean()
+      models.Role.find().lean(),
+      models.Session.find().lean()
     ]);
 
     const rolesMap = {};
@@ -175,6 +178,7 @@ async function fetchStateFromMongo() {
     }
 
     return {
+      sessions: (sessions || []).map(cleanDoc),
       rates: rates ? cleanDoc(rates) : {},
       items: (items || []).map(cleanDoc),
       clients: (clients || []).map(cleanDoc),
@@ -189,8 +193,7 @@ async function fetchStateFromMongo() {
       roles: Object.keys(rolesMap).length ? rolesMap : undefined
     };
   } catch (err) {
-    console.warn('[DB] fetchStateFromMongo error:', err.message);
-    return null;
+    throw Object.assign(new Error('No se pudo leer MongoDB.'),{status:503,cause:err});
   }
 }
 

@@ -6,13 +6,13 @@ class DigitalScale {
     this.selectedCategory = 'nacional'; // 'nacional' | 'italiano' | 'puro24k' | 'retal'
     this.customSaleRate = null; // Defined on the fly!
     this.averages = {
-      promedioPuro24k: 404810,
-      promedioItaliano: 283811,
-      promedioNacional: 259514
+      promedioPuro24k: 0,
+      promedioItaliano: 0,
+      promedioNacional: 0
     };
     this.rates = {
-      retal_oro18k_compra: 255000,
-      oro24k_fino_benchmark: 405000
+      retal_oro18k_compra: 0,
+      oro24k_fino_benchmark: 0
     };
   }
 
@@ -27,13 +27,14 @@ class DigitalScale {
   }
 
   setWeight(grams) {
+    if(!Number.isFinite(Number(grams))) return;
     this.currentGrams = Math.max(0, Number(Number(grams).toFixed(2)));
-    if (window.soundEngine) window.soundEngine.playScaleBeep();
     this.render();
   }
 
   addWeight(grams) {
-    this.setWeight(this.currentGrams + grams);
+    if(!Number.isFinite(Number(grams))) return;
+    this.setWeight(this.currentGrams + Number(grams));
   }
 
   tare() {
@@ -49,12 +50,12 @@ class DigitalScale {
   setCategory(cat) {
     this.selectedCategory = cat;
     this.customSaleRate = null; // reset custom negotiated rate
-    if (window.soundEngine) window.soundEngine.playChime();
     this.render();
   }
 
   setCustomSaleRate(rate) {
-    this.customSaleRate = parseFloat(rate) || null;
+    const parsed = Number(rate);
+    this.customSaleRate = String(rate).trim() !== '' && Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
     this.render();
   }
 
@@ -65,29 +66,29 @@ class DigitalScale {
 
     switch (this.selectedCategory) {
       case 'nacional':
-        costPerGram = this.averages.promedioNacional || 259514;
+        costPerGram = this.averages.promedioNacional ?? 0;
         label = 'Oro 18K Nacional';
         suggestedSaleRate = Math.round(costPerGram * 1.15); // +15% sugerido
         break;
       case 'italiano':
-        costPerGram = this.averages.promedioItaliano || 283811;
+        costPerGram = this.averages.promedioItaliano ?? 0;
         label = 'Oro 18K Italiano (750)';
         suggestedSaleRate = Math.round(costPerGram * 1.15);
         break;
       case 'puro24k':
-        costPerGram = this.averages.promedioPuro24k || 404810;
+        costPerGram = this.averages.promedioPuro24k ?? 0;
         label = 'Oro Puro 24K (Granalla / Fino)';
         suggestedSaleRate = costPerGram;
         break;
       case 'retal':
-        costPerGram = this.rates.retal_oro18k_compra || 255000;
+        costPerGram = this.rates.retal_oro18k_compra ?? 0;
         label = 'Retal / Oro Chatarra 18K';
         suggestedSaleRate = costPerGram;
         break;
       default:
-        costPerGram = 260000;
+        costPerGram = 0;
         label = 'Oro 18K';
-        suggestedSaleRate = 300000;
+        suggestedSaleRate = 0;
     }
 
     const effectiveSaleRate = this.customSaleRate !== null ? this.customSaleRate : suggestedSaleRate;
@@ -130,8 +131,8 @@ class DigitalScale {
 
     const marginElem = document.getElementById('scale-margin-display');
     if (marginElem) {
-      const marginPct = totalCost > 0 ? ((margin / totalCost) * 100).toFixed(1) : '0.0';
-      marginElem.innerText = `+$${margin.toLocaleString('es-CO')} (${marginPct}%)`;
+      const marginPct = totalWholesale > 0 ? ((margin / totalWholesale) * 100).toFixed(1) : '0.0';
+      marginElem.innerText = `${margin < 0 ? '-' : '+'}$${Math.abs(margin).toLocaleString('es-CO')} (${marginPct}%)`;
       marginElem.style.color = margin >= 0 ? '#34d399' : '#f87171';
     }
   }

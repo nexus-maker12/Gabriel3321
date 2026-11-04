@@ -1,6 +1,6 @@
-# 💎 Nexus por Mayor - Plataforma Mayorista de Joyería por Gramo
+# 💎 Áurea Mayoristas - Plataforma Mayorista de Joyería por Gramo
 
-**Nexus por Mayor** es una solución especializada de alta gama diseñada con las reglas exactas del gremio de **joyería al por mayor**:
+**Áurea Mayoristas** es una solución especializada de alta gama diseñada con las reglas exactas del gremio de **joyería al por mayor**:
 1. **Netamente por gramaje**: Eliminado el conteo de piezas en lote; cada movimiento se audita en peso real (`g`).
 2. **Sin precios rígidos de venta**: En inventario no existe precio de venta fijo. El precio por gramo se pacta en caliente con el cliente al momento de pesar y despachar.
 3. **Promedios Ponderados Matemáticos**:
@@ -15,12 +15,12 @@
 
 ## 🚀 Acceso Rápido
 
-El servidor se encuentra activo en tu equipo:
+Al iniciar el servidor, la aplicación estará disponible en:
 👉 **`http://localhost:3500`**
 
 Para iniciar manualmente en el futuro:
 ```bash
-cd C:\Users\Usuario\.gemini\antigravity-ide\scratch\nexus-por-mayor
+cd "C:\Users\User\Desktop\Backup\nexus-por-mayor"
 npm start
 ```
 
@@ -34,3 +34,17 @@ npm start
 - **`Despacho & Balanza`**: Registro de pesadas, definición del precio acordado /g, cálculo del margen en vivo y remisión oficial imprimible.
 - **`Cartera CxC`**: Cuentas por cobrar en pesos y su equivalente en gramos de oro 18K.
 - **`Proveedores & CxP`**: Saldos de mano de obra, deudas en dinero y oro puro en poder de cada taller.
+
+## Identidad de Áurea
+
+La interfaz incorpora la identidad de Áurea: verde profundo, marfil, dorado suave, símbolo vectorial y modos claro y oscuro. Consulta `design/IDENTIDAD-AUREA.md` para los detalles y la verificación.
+
+## Revisión de errores
+
+La revisión del 4 de noviembre de 2026 y sus límites están documentados en `design/AUDITORIA-2026-11-04.md`. Para ejecutar las pruebas aisladas: `node scripts/stress-test.js`.
+
+La API requiere iniciar sesión. Las instalaciones vacías requieren `INITIAL_ADMIN_PASSWORD` (mínimo ocho caracteres); las cuentas existentes mantienen su contraseña registrada. Con `MONGODB_URI` configurado, un fallo remoto bloquea operaciones hasta recuperar la conexión. `AUREA_STORAGE=local` selecciona explícitamente almacenamiento local y `AUREA_DATA_FILE` permite seleccionar un archivo distinto, como hacen las pruebas.
+
+## Instalación nueva
+
+Copia `.env.example` a `.env` y configura tus propias credenciales. Para crear el primer superadministrador de una base vacía, define `INITIAL_ADMIN_PASSWORD`. `data/database.example.json` contiene únicamente una estructura vacía opcional. La base operativa `data/database.json`, las credenciales y los respaldos se excluyen de Git y del paquete de despliegue. Una instalación conectada a MongoDB utiliza los usuarios existentes de esa base.

@@ -1,0 +1,25 @@
+{
+  "rates": {
+    "oro24k_fino_benchmark": 0,
+    "oro18k_nacional_base": 0,
+    "oro18k_italiano_base": 0,
+    "retal_oro18k_compra": 0,
+    "plata925_venta": 0
+  },
+  "puro24k": {
+    "stockGrams": 0,
+    "purchases": [],
+    "deliveries": []
+  },
+  "items": [],
+  "clients": [],
+  "suppliers": [],
+  "orders": [],
+  "payments": [],
+  "categories": [],
+  "paymentMethods": [],
+  "cashMovements": [],
+  "sessions": [],
+  "roles": {},
+  "users": []
+}

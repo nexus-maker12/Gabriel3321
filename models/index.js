@@ -10,6 +10,7 @@ const CashMovement = require('./CashMovement');
 const Puro24k = require('./Puro24k');
 const User = require('./User');
 const Role = require('./Role');
+const Session = require('./Session');
 
 module.exports = {
   Rates,
@@ -23,5 +24,6 @@ module.exports = {
   CashMovement,
   Puro24k,
   User,
-  Role
+  Role,
+  Session
 };

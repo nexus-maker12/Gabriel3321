@@ -1,13 +1,14 @@
 {
-  "name": "nexus-por-mayor",
+  "name": "aurea-mayoristas",
   "version": "1.0.0",
-  "description": "Nexus por Mayor - Sistema de Gestión Mayorista Joyera por Gramo, Italiano y Nacional",
+  "description": "Áurea Mayoristas · Gestión de joyería por gramo, bóveda, metales y relaciones comerciales.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
     "seed:mongo": "node scripts/seed-mongo.js",
-    "test:stress": "node scripts/stress-test.js"
+    "test:stress": "node scripts/stress-test.js",
+    "test": "node --test test/regression.test.cjs test/client.test.cjs test/persistence.test.cjs"
   },
   "keywords": [
     "jewelry",

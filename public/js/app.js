@@ -1,5 +1,42 @@
-// Nexus por Mayor - Main Application Controller (Averaging & Dynamic Pricing Engine)
+const escapeHTML = value => AureaSafe.escapeHtml(value);
+// Áurea Mayoristas - Main Application Controller (Averaging & Dynamic Pricing Engine)
 const App = {
+  clearSessionData() {
+    for(const key of ['items','clients','suppliers','orders','payments','categories','paymentMethods','usersList','dispatchCart','modulesCatalog']) this[key]=[];
+    for(const key of ['stats','rates','averages','rolesCatalog','currentPermissions']) this[key]={};
+    this.puroData={stockGrams:0,purchases:[],deliveries:[]};
+    this.balanceGeneralData=null;this.gastosData=null;
+    this.selectedCarteraClientId=null;this.requestIds?.clear();
+  },
+  async apiFetch(url, options = {}) {
+    const resources = {
+      '/api/stats':['dashboard'], '/api/rates':['dashboard','puro','inventario','despacho','cxc','cxp','balance-general','gastos-operativos','cuadre-caja'],
+      '/api/items':['inventario','despacho','dashboard'], '/api/clients':['joyerias','cartera-clientes','cxc','despacho','dashboard','cuadre-caja'],
+      '/api/suppliers':['proveedores','cxp','puro','dashboard'], '/api/orders':['remisiones','cartera-clientes','despacho','dashboard','cuadre-caja'],
+      '/api/payments':['cxc','cxp','cartera-clientes','dashboard','cuadre-caja'], '/api/puro':['puro'],
+      '/api/payment-methods':['metodos-pago','despacho','cxc','cxp','cuadre-caja','gastos-operativos'], '/api/categories':['inventario','despacho','puro']
+    };
+    if((options.method||'GET')==='GET' && this.currentUser && resources[url] && !resources[url].some(module=>this.hasPermission(module,'canView'))) return new Response(JSON.stringify({success:false}),{status:200,headers:{'Content-Type':'application/json'}});
+    const headers = new Headers(options.headers || {});
+    if (this.authToken) headers.set('Authorization','Bearer '+this.authToken);
+    let writeKey;
+    if(options.method==='POST' && ['/api/orders','/api/payments'].includes(url)) {
+      this.requestIds ||= new Map();
+      writeKey=url+'\n'+options.body;
+      if(!this.requestIds.has(writeKey)) this.requestIds.set(writeKey,window.crypto.randomUUID());
+      headers.set('Idempotency-Key',this.requestIds.get(writeKey));
+    }
+    const response = await window.fetch(url,{...options,headers});
+    if(writeKey && (response.ok || (response.status>=400 && response.status<500))) this.requestIds.delete(writeKey);
+    if(response.status===401 && !url.startsWith('/api/auth/')) {
+      this.clearSessionData();
+      this.authToken=null; this.currentUser=null; this.currentPermissions={};
+      try {localStorage.removeItem('nexus_token');sessionStorage.removeItem('nexus_token');localStorage.removeItem('nexus_user');} catch(error) {}
+      this.showLoginScreen();
+      this.showLoginAlert('La sesión terminó. Ingresa de nuevo.','danger');
+    }
+    return response;
+  },
   currentView: 'dashboard',
   rates: {},
   averages: {},
@@ -17,7 +54,7 @@ const App = {
   carteraViewMode: 'cards', // 'cards' | 'table'
   selectedCarteraClientId: null,
   selectedClientDetailTab: 'ledger',
-  currentTheme: 'dark', // 'dark' | 'light'
+  currentTheme: 'light', // 'dark' | 'light'
   gastosPeriod: 'mes',
   gastosStartDate: '',
   gastosEndDate: '',
@@ -42,8 +79,9 @@ const App = {
   usersActiveTab: 'directorio',
 
   initTheme() {
-    const saved = localStorage.getItem('nexus_theme');
-    const theme = (saved === 'light' || saved === 'dark') ? saved : 'dark';
+    let saved;
+    try { saved = localStorage.getItem('aurea_theme') || localStorage.getItem('nexus_theme'); } catch (e) {}
+    const theme = (saved === 'light' || saved === 'dark') ? saved : 'light';
     this.applyTheme(theme);
   },
 
@@ -52,7 +90,7 @@ const App = {
     document.documentElement.setAttribute('data-theme', theme);
     document.body.classList.remove('theme-dark', 'theme-light');
     document.body.classList.add('theme-' + theme);
-    try { localStorage.setItem('nexus_theme', theme); } catch (e) {}
+    try { localStorage.setItem('aurea_theme', theme); } catch (e) {}
 
     const iconEl = document.getElementById('theme-icon');
     const textEl = document.getElementById('theme-text');
@@ -61,35 +99,28 @@ const App = {
 
     const isLight = theme === 'light';
     const nextLabel = isLight ? 'Modo Oscuro' : 'Modo Claro';
-    const nextIcon = isLight ? '🌙' : '☀️';
+    const nextIcon = isLight ? '' : '';
 
     if (iconEl) iconEl.innerText = nextIcon;
     if (textEl) textEl.innerText = nextLabel;
     if (sideIconEl) sideIconEl.innerText = nextIcon;
-    if (sideLabelEl) sideLabelEl.innerText = isLight ? 'Oscuro' : 'Claro';
+    if (sideLabelEl) sideLabelEl.innerText = isLight ? 'Modo Oscuro' : 'Modo Claro';
   },
 
   toggleTheme() {
     const next = this.currentTheme === 'dark' ? 'light' : 'dark';
     this.applyTheme(next);
-    if (window.soundEngine) window.soundEngine.playChime();
   },
 
-  toggleSound() {
-    if (!window.soundEngine) return;
-    const isMuted = window.soundEngine.toggleMute();
-    const soundLabel = document.getElementById('sidebar-sound-label');
-    const soundIcon = document.getElementById('sidebar-sound-icon');
-    if (soundLabel) soundLabel.innerText = isMuted ? 'Muted' : 'Audio';
-    if (soundIcon) soundIcon.innerText = isMuted ? '🔇' : '🔊';
-  },
+  toggleSound() {},
 
   async init() {
-    console.log('💎 Iniciando Nexus por Mayor (Modo Gramaje & Promedios Ponderados)...');
+    console.log(' Iniciando Áurea Mayoristas (Modo Gramaje & Promedios Ponderados)...');
     this.initTheme();
     this.setupNavigation();
     this.setupEventListeners();
     await this.initAuthSession();
+    if(!this.currentUser) return;
     await this.refreshAllData();
     this.render();
   },
@@ -97,16 +128,16 @@ const App = {
   async refreshAllData() {
     try {
       const [statsRes, ratesRes, itemsRes, clientsRes, suppliersRes, ordersRes, paymentsRes, puroRes, payMethodsRes, catRes] = await Promise.all([
-        fetch('/api/stats').then(r => r.json()),
-        fetch('/api/rates').then(r => r.json()),
-        fetch('/api/items').then(r => r.json()),
-        fetch('/api/clients').then(r => r.json()),
-        fetch('/api/suppliers').then(r => r.json()),
-        fetch('/api/orders').then(r => r.json()),
-        fetch('/api/payments').then(r => r.json()),
-        fetch('/api/puro').then(r => r.json()),
-        fetch('/api/payment-methods').then(r => r.json()),
-        fetch('/api/categories').then(r => r.json()).catch(() => ({ success: false }))
+        this.apiFetch('/api/stats').then(r => r.json()),
+        this.apiFetch('/api/rates').then(r => r.json()),
+        this.apiFetch('/api/items').then(r => r.json()),
+        this.apiFetch('/api/clients').then(r => r.json()),
+        this.apiFetch('/api/suppliers').then(r => r.json()),
+        this.apiFetch('/api/orders').then(r => r.json()),
+        this.apiFetch('/api/payments').then(r => r.json()),
+        this.apiFetch('/api/puro').then(r => r.json()),
+        this.apiFetch('/api/payment-methods').then(r => r.json()),
+        this.apiFetch('/api/categories').then(r => r.json()).catch(() => ({ success: false }))
       ]);
 
       if (statsRes.success) {
@@ -151,21 +182,12 @@ const App = {
       });
     });
 
-    // Sound toggle
-    const soundBtn = document.getElementById('btn-toggle-sound');
-    if (soundBtn) {
-      soundBtn.addEventListener('click', () => {
-        const isMuted = window.soundEngine.toggleMute();
-        soundBtn.innerHTML = isMuted 
-          ? `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5L6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg> Sonido OFF`
-          : `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg> Sonido ON`;
-      });
-    }
   },
 
   switchView(viewName) {
+    if(!this.hasPermission(viewName,'canView')) return;
     this.currentView = viewName;
-    if (window.soundEngine) window.soundEngine.playChime();
+    window.dispatchEvent(new CustomEvent('aurea:view', { detail: viewName }));
 
     // Update nav classes
     document.querySelectorAll('.nav-item').forEach(item => {
@@ -378,7 +400,7 @@ const App = {
     if (chipVal) chipVal.innerText = `${total18k.toFixed(2)} g`;
     if (chipIt) chipIt.innerText = `IT: ${it.toFixed(1)}g`;
     if (chipNc) chipNc.innerText = `NC: ${nc.toFixed(1)}g`;
-    if (chipPuro) chipPuro.innerText = `👑 24K: ${puro.toFixed(1)}g`;
+    if (chipPuro) chipPuro.innerText = ` 24K: ${puro.toFixed(1)}g`;
   },
 
   render() {
@@ -426,7 +448,7 @@ const App = {
     const elNcGrams = document.getElementById('dash-nc-grams');
     
     const elPuroStock = document.getElementById('dash-puro-stock');
-    const elPuroCost = document.getElementById('dash-puro-avg-cost');
+    const elPuroCost = document.getElementById('dash-puro-cost');
     const elPuroTalleres = document.getElementById('dash-puro-talleres');
 
     const elVaultVal = document.getElementById('dash-vault-cost');
@@ -473,7 +495,7 @@ const App = {
     const totalDebtGrams = clients.reduce((acc, c) => acc + (Number(c.currentDebtGrams) || 0), 0);
     const activeDebtors = clients.filter(c => (Number(c.currentDebtPesos) || 0) > 0);
     const cleanCount = clients.length - activeDebtors.length;
-    const totalCreditLimit = clients.reduce((acc, c) => acc + (Number(c.creditLimitPesos) || 50000000), 0);
+    const totalCreditLimit = clients.reduce((acc, c) => acc + (Number(c.creditLimitPesos ?? 50000000)), 0);
     const usagePctGlobal = totalCreditLimit > 0 ? Math.round((totalDebtPesos / totalCreditLimit) * 100) : 0;
 
     // Retal in CxC abonos
@@ -524,7 +546,7 @@ const App = {
     } else if (statusVal === 'cupo-alerta') {
       list = list.filter(c => {
         const debt = Number(c.currentDebtPesos) || 0;
-        const limit = Number(c.creditLimitPesos) || 50000000;
+        const limit = Number(c.creditLimitPesos ?? 50000000);
         return limit > 0 && (debt / limit) >= 0.7;
       });
     } else if (statusVal === 'riesgo-c') {
@@ -548,15 +570,15 @@ const App = {
     tbody.innerHTML = list.map(client => {
       const debtPesos = Number(client.currentDebtPesos) || 0;
       const debtGrams = Number(client.currentDebtGrams) || (refRate > 0 ? Number((debtPesos / refRate).toFixed(2)) : 0);
-      const creditLimit = Number(client.creditLimitPesos) || 50000000;
+      const creditLimit = Number(client.creditLimitPesos ?? 50000000);
       const usagePct = creditLimit > 0 ? Math.min(100, Math.round((debtPesos / creditLimit) * 100)) : 0;
 
       let barColor = '#10b981';
       if (usagePct >= 80) barColor = '#ef4444';
-      else if (usagePct >= 50) barColor = '#f59e0b';
+      else if (usagePct >= 50) barColor = '#a18350';
 
       let riskBadge = `<span class="stat-badge pos">A</span>`;
-      if ((client.riskLevel || '').startsWith('B')) riskBadge = `<span class="stat-badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24;">B</span>`;
+      if ((client.riskLevel || '').startsWith('B')) riskBadge = `<span class="stat-badge" style="background: rgba(245, 158, 11, 0.2); color: #b79b68;">B</span>`;
       else if ((client.riskLevel || '').startsWith('C')) riskBadge = `<span class="stat-badge neg">C</span>`;
 
       return `
@@ -599,17 +621,13 @@ const App = {
           <td class="text-center" style="white-space: nowrap;">
             <div style="display: inline-flex; gap: 4px;">
               <button class="btn btn-gold btn-sm" onclick="App.openClientCarteraDetail('${client.id}')" style="padding: 4px 8px; font-size: 0.75rem;" title="Ver Expediente de Cartera">
-                🔍 Ficha
+                 Ficha
               </button>
               <button class="btn btn-outline-gold btn-sm" onclick="App.openAbonoModal('${client.id}', 'cxc')" style="padding: 4px 8px; font-size: 0.75rem;" title="Registrar Abono">
-                💰 Abonar
+                 Abonar
               </button>
-              <button class="btn btn-secondary btn-sm" onclick="App.sendClientWhatsApp('${client.id}')" style="padding: 4px 8px; font-size: 0.75rem;" title="Recordatorio por WhatsApp">
-                💬
-              </button>
-              <button class="btn btn-secondary btn-sm" onclick="App.openStatementPrintModal('${client.id}')" style="padding: 4px 8px; font-size: 0.75rem;" title="Imprimir Estado de Cuenta">
-                📄
-              </button>
+              <button class="btn btn-secondary btn-sm" onclick="App.sendClientWhatsApp('${client.id}')" style="padding: 4px 8px; font-size: 0.75rem;" title="Recordatorio por WhatsApp">WhatsApp</button>
+              <button class="btn btn-secondary btn-sm" onclick="App.openStatementPrintModal('${client.id}')" style="padding: 4px 8px; font-size: 0.75rem;" title="Imprimir Estado de Cuenta">Estado de cuenta</button>
             </div>
           </td>
         </tr>
@@ -642,8 +660,8 @@ const App = {
       } else {
         purchBody.innerHTML = purchases.map(p => `
           <tr>
-            <td>${p.date ? new Date(p.date).toLocaleDateString('es-CO') : '-'}</td>
-            <td><strong>${p.supplierName || 'Proveedor'}</strong> <span style="font-size: 0.72rem; color: var(--text-dim);">(Ref: ${p.invoiceRef || 'S/N'})</span></td>
+            <td>${p.date ? new Date(p.date).toLocaleDateString('es-CO', {timeZone:'America/Bogota'}) : '-'}</td>
+            <td><strong>${escapeHTML(p.supplierName || 'Proveedor')}</strong> <span style="font-size: 0.72rem; color: var(--text-dim);">(Ref: ${p.invoiceRef || 'S/N'})</span></td>
             <td class="text-right mono" style="font-weight: 700; color: var(--gold-light);">${Number(p.grams || 0).toFixed(2)} g</td>
             <td class="text-right mono">$${Number(p.costPerGram || 0).toLocaleString('es-CO')} /g</td>
             <td class="text-right mono" style="font-weight: 800; color: var(--text-headings);">$${Number(p.totalCost || 0).toLocaleString('es-CO')}</td>
@@ -662,13 +680,13 @@ const App = {
         delivBody.innerHTML = deliveries.map(d => {
           const isEntrega = d.type === 'entrega_puro';
           const badge = isEntrega 
-            ? `<span class="stat-badge" style="background: rgba(239, 68, 68, 0.2); color: #f87171;">📤 Entrega a Taller</span>`
-            : `<span class="stat-badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399;">📥 Recibido Terminado</span>`;
+            ? `<span class="stat-badge" style="background: rgba(239, 68, 68, 0.2); color: #f87171;"> Entrega a Taller</span>`
+            : `<span class="stat-badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399;"> Recibido Terminado</span>`;
 
           return `
             <tr>
-              <td>${d.date ? new Date(d.date).toLocaleDateString('es-CO') : '-'}</td>
-              <td><strong>${d.supplierName || 'Taller'}</strong></td>
+              <td>${d.date ? new Date(d.date).toLocaleDateString('es-CO', {timeZone:'America/Bogota'}) : '-'}</td>
+              <td><strong>${escapeHTML(d.supplierName || 'Taller')}</strong></td>
               <td>${badge}</td>
               <td class="text-right mono" style="font-weight: 700;">
                 ${isEntrega ? `<span style="color: #f87171;">-${Number(d.grams24k || 0).toFixed(2)} g puro</span>` : `<span style="color: #34d399;">+${Number(d.grams18kReceived || 0).toFixed(2)} g 18K</span>`}
@@ -676,7 +694,7 @@ const App = {
               <td class="text-right mono">
                 ${isEntrega ? `Costo: $${Number(d.costAtDelivery || 0).toLocaleString('es-CO')}/g` : `Mano de obra: $${Number(d.manoDeObraRate || 0).toLocaleString('es-CO')}/g`}
               </td>
-              <td style="font-size: 0.8rem; color: var(--text-muted);">${d.notes || ''}</td>
+              <td style="font-size: 0.8rem; color: var(--text-muted);">${escapeHTML(d.notes || '')}</td>
             </tr>
           `;
         }).join('');
@@ -696,17 +714,17 @@ const App = {
 
           return `
             <tr>
-              <td><strong>${t.name}</strong> <span style="font-size: 0.72rem; color: var(--text-dim);">(${t.city || 'Nacional'})</span></td>
+              <td><strong>${escapeHTML(t.name)}</strong> <span style="font-size: 0.72rem; color: var(--text-dim);">(${escapeHTML(t.city || 'Nacional')})</span></td>
               <td class="mono">$${(t.manoDeObraPerGram || 0).toLocaleString('es-CO')} /g</td>
-              <td class="text-right mono" style="font-weight: 800; font-size: 1.05rem; color: #fbbf24;">${puroHands.toFixed(2)} g</td>
+              <td class="text-right mono" style="font-weight: 800; font-size: 1.05rem; color: #b79b68;">${puroHands.toFixed(2)} g</td>
               <td class="text-right mono" style="font-weight: 800; font-size: 1.05rem; color: #34d399;">
                 ${mercancia18k.toFixed(2)} g
                 ${puroHands > 0 ? '<div style="font-size: 0.68rem; color: var(--text-dim); font-weight: normal;">(+38% liga)</div>' : ''}
               </td>
               <td class="text-right mono" style="font-weight: 800; color: #f87171;">$${(t.balanceManoDeObra || 0).toLocaleString('es-CO')}</td>
               <td class="text-center">
-                <button class="btn btn-outline-gold btn-sm" onclick="App.openEntregaPuroModal('${t.id}')">📤 Entregar Puro</button>
-                <button class="btn btn-gold btn-sm" onclick="App.openRecepcionTallerModal('${t.id}')">📥 Recibir Joyería</button>
+                <button class="btn btn-outline-gold btn-sm" onclick="App.openEntregaPuroModal('${t.id}')"> Entregar Puro</button>
+                <button class="btn btn-gold btn-sm" onclick="App.openRecepcionTallerModal('${t.id}')"> Recibir Joyería</button>
               </td>
             </tr>
           `;
@@ -723,14 +741,14 @@ const App = {
         name: cat.name,
         slug: cat.slug,
         badgeText: cat.badgeText || cat.name,
-        color: cat.color || '#d4af37',
+        color: cat.color || '#b79b68',
         description: cat.description || ''
       };
     }
     if (slug === 'italiano') {
-      return { id: 'cat-italiano', name: 'Oro Italiano 18K (750)', slug: 'italiano', badgeText: '🇮🇹 Italiano 18K', color: '#34d399', description: '' };
+      return { id: 'cat-italiano', name: 'Oro Italiano 18K (750)', slug: 'italiano', badgeText: ' Italiano 18K', color: '#34d399', description: '' };
     }
-    return { id: 'cat-nacional', name: 'Oro Nacional 18K', slug: 'nacional', badgeText: '🇨🇴 Nacional 18K', color: '#fbbf24', description: '' };
+    return { id: 'cat-nacional', name: 'Oro Nacional 18K', slug: 'nacional', badgeText: ' Nacional 18K', color: '#b79b68', description: '' };
   },
 
   setCategoryFilter(categorySlug) {
@@ -748,28 +766,28 @@ const App = {
 
     let html = `
       <button class="cat-tab ${isAllActive ? 'active' : ''}" onclick="App.setCategoryFilter('all')">
-        🌟 Todos los Lotes <span class="cat-badge-counter" id="cnt-cat-all">${allCount}</span>
+         Todos los Lotes <span class="cat-badge-counter" id="cnt-cat-all">${allCount}</span>
       </button>
     `;
 
     (this.categories || []).forEach(cat => {
       const count = (this.items || []).filter(i => i.category === cat.slug).length;
       const isActive = this.activeCategoryFilter === cat.slug;
-      const color = cat.color || '#d4af37';
+      const color = cat.color || '#b79b68';
       const activeStyle = isActive 
         ? `border-color: ${color}; color: ${color}; box-shadow: 0 0 16px ${color}33;` 
         : '';
 
       html += `
         <button class="cat-tab ${isActive ? 'active' : ''}" style="${activeStyle}" onclick="App.setCategoryFilter('${cat.slug}')">
-          ${cat.badgeText || cat.name} <span class="cat-badge-counter" style="${isActive ? `background: ${color}33; color: ${color}; font-weight: 800;` : ''}">${count}</span>
+          ${escapeHTML(cat.badgeText || cat.name)} <span class="cat-badge-counter" style="${isActive ? `background: ${color}33; color: ${color}; font-weight: 800;` : ''}">${count}</span>
         </button>
       `;
     });
 
     html += `
       <button class="cat-tab cat-tab-manage" onclick="App.openManageCategoriesModal()" title="Añadir, editar o eliminar categorías de inventario">
-        ⚙️ Categorías
+         Categorías
       </button>
     `;
 
@@ -820,7 +838,7 @@ const App = {
       const diffVsAvg = item.costPerGram - benchmarkAvg;
       let diffBadge = `<span class="stat-badge pos">A la media</span>`;
       if (diffVsAvg > 0) {
-        diffBadge = `<span class="stat-badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24;">+$${diffVsAvg.toLocaleString('es-CO')} vs prom</span>`;
+        diffBadge = `<span class="stat-badge" style="background: rgba(245, 158, 11, 0.2); color: #b79b68;">+$${diffVsAvg.toLocaleString('es-CO')} vs prom</span>`;
       } else if (diffVsAvg < 0) {
         diffBadge = `<span class="stat-badge pos">-$${Math.abs(diffVsAvg).toLocaleString('es-CO')} vs prom</span>`;
       }
@@ -829,14 +847,14 @@ const App = {
         <div class="item-card">
           <div class="item-badge-corner">
             <span class="ticker-badge" style="color: ${catInfo.color}; border: 1px solid ${catInfo.color}66; background: ${catInfo.color}22; font-weight: 700; padding: 3px 8px; border-radius: 9999px;">
-              ${catInfo.badgeText}
+              ${escapeHTML(catInfo.badgeText)}
             </span>
           </div>
 
           <div class="item-header">
-            <span class="item-code">${item.code}</span>
-            <h3 class="item-name">${item.name}</h3>
-            <span class="item-origin">📍 ${item.origin} • ${item.subcategory}</span>
+            <span class="item-code">${escapeHTML(item.code)}</span>
+            <h3 class="item-name">${escapeHTML(item.name)}</h3>
+            <span class="item-origin"> ${escapeHTML(item.origin)} • ${escapeHTML(item.subcategory)}</span>
           </div>
 
           <div class="item-weight-box">
@@ -863,11 +881,9 @@ const App = {
 
           <div class="item-actions">
             <button class="btn btn-gold btn-sm" style="flex: 1;" onclick="App.quickDispatchItem('${item.id}')">
-              ⚡ Pesar & Vender
+               Pesar & Vender
             </button>
-            <button class="btn btn-secondary btn-icon btn-sm" title="Ajustar Gramos" onclick="App.editItemPrompt('${item.id}')">
-              ⚖️
-            </button>
+            <button class="btn btn-secondary btn-icon btn-sm" title="Ajustar Gramos" onclick="App.editItemPrompt('${item.id}')">Pesar</button>
           </div>
         </div>
       `;
@@ -889,12 +905,14 @@ const App = {
   },
 
   renderDespacho() {
+    const retalRateInput=document.getElementById('pay-scrap-rate');
+    if(retalRateInput && !this.dispatchCart.length) retalRateInput.value=this.rates.retal_oro18k_compra ?? 0;
     // Populate client selector
     const clientSelect = document.getElementById('despacho-client-select');
     if (clientSelect) {
       clientSelect.innerHTML = `<option value="">-- Seleccionar Joyería o Cliente Mayorista --</option>` +
         this.clients.map(c => `
-          <option value="${c.id}">${c.tradeName || c.name} (${c.city || 'Principal'}) - Saldo CxC: $${c.currentDebtPesos.toLocaleString('es-CO')}</option>
+          <option value="${c.id}">${escapeHTML(c.tradeName || c.name)} (${escapeHTML(c.city || 'Principal')}) - Saldo CxC: $${c.currentDebtPesos.toLocaleString('es-CO')}</option>
         `).join('');
 
       clientSelect.onchange = () => {
@@ -907,7 +925,7 @@ const App = {
             const badgeClass = isGood ? 'pos' : (isHighRisk ? 'neg' : 'accent-gold');
             infoEl.innerHTML = `
               <span class="stat-badge ${badgeClass}" style="font-weight: 800;">
-                Calificación: ${selClient.riskLevel || 'B - Normal'}
+                Calificación: ${escapeHTML(selClient.riskLevel || 'B - Normal')}
               </span>
               <span style="font-size: 0.8rem; color: var(--text-muted);">
                 Cupo Crédito: <strong style="color: var(--text-headings);">$${(selClient.creditLimitPesos || 0).toLocaleString('es-CO')}</strong> | 
@@ -927,7 +945,7 @@ const App = {
       itemSelect.innerHTML = `<option value="">-- Seleccionar Lote de Oro de Bóveda --</option>` +
         this.items.map(i => {
           const cat = this.getCategoryBadge(i.category);
-          return `<option value="${i.id}">[${cat.badgeText}] ${i.code} - ${i.name} (Stock: ${i.weightGrams}g - Costo: $${i.costPerGram.toLocaleString('es-CO')}/g)</option>`;
+          return `<option value="${i.id}">[${escapeHTML(cat.badgeText)}] ${escapeHTML(i.code)} - ${escapeHTML(i.name)} (Stock: ${i.weightGrams}g - Costo: $${i.costPerGram.toLocaleString('es-CO')}/g)</option>`;
         }).join('');
 
       itemSelect.onchange = () => {
@@ -975,8 +993,11 @@ const App = {
   },
 
   addItemToDispatch(item, weightGrams, salePricePerGram) {
-    const price = Number(salePricePerGram) || Math.round(item.costPerGram * 1.15);
-    const existing = this.dispatchCart.find(c => c.itemId === item.id);
+    const price = Number(salePricePerGram);
+    weightGrams = Math.round(Number(weightGrams)*100)/100;
+    const existing = this.dispatchCart.find(c => c.itemId === item.id && c.pricePerGram === price);
+    if(!Number.isFinite(price)||price<=0||!Number.isFinite(weightGrams)||weightGrams<=0) {alert('Ingresa un peso y precio mayores a cero.');return;}
+    if(weightGrams+this.dispatchCart.filter(c=>c.itemId===item.id).reduce((sum,c)=>sum+c.weightGrams,0)>Number(item.weightGrams)+1e-8) {alert('El peso supera las existencias disponibles.');return;}
     if (existing) {
       existing.weightGrams = Number((existing.weightGrams + weightGrams).toFixed(2));
       existing.pricePerGram = price;
@@ -1033,10 +1054,10 @@ const App = {
 
       return `
         <tr>
-          <td class="mono" style="font-weight: 700; color: var(--gold-primary);">${row.code}</td>
+          <td class="mono" style="font-weight: 700; color: var(--gold-primary);">${escapeHTML(row.code)}</td>
           <td>
-            <strong>${row.name}</strong>
-            <div style="font-size: 0.72rem; color: ${this.getCategoryBadge(row.category).color}; font-weight: 700;">${this.getCategoryBadge(row.category).badgeText}</div>
+            <strong>${escapeHTML(row.name)}</strong>
+            <div style="font-size: 0.72rem; color: ${escapeHTML(this.getCategoryBadge(row.category).color)}; font-weight: 700;">${escapeHTML(this.getCategoryBadge(row.category).badgeText)}</div>
           </td>
           <td class="text-right">
             <input type="number" step="0.01" min="0.01" value="${row.weightGrams}" 
@@ -1066,15 +1087,13 @@ const App = {
   },
 
   updateCartRow(index, newWeight, newPrice) {
-    if (!this.dispatchCart[index]) return;
-    if (newWeight !== null) this.dispatchCart[index].weightGrams = parseFloat(newWeight) || 0;
-    if (newPrice !== null) this.dispatchCart[index].pricePerGram = parseFloat(newPrice) || 0;
-
-    const row = this.dispatchCart[index];
-    row.subtotal = Math.round(row.weightGrams * row.pricePerGram);
-    row.subtotalCost = Math.round(row.weightGrams * row.costPerGram);
-    row.margin = row.subtotal - row.subtotalCost;
-
+    const row=this.dispatchCart[index]; if(!row) return;
+    const weight=newWeight===null?row.weightGrams:Math.round(Number(newWeight)*100)/100;
+    const price=newPrice===null?row.pricePerGram:Number(newPrice);
+    const item=this.items.find(item=>item.id===row.itemId);
+    if(!Number.isFinite(weight)||weight<=0||weight+this.dispatchCart.filter((c,i)=>i!==index&&c.itemId===row.itemId).reduce((sum,c)=>sum+c.weightGrams,0)>Number(item?.weightGrams)||!Number.isFinite(price)||price<=0) {alert('Revisa el peso disponible y el precio.');this.renderDispatchTable();return;}
+    row.weightGrams=weight;row.pricePerGram=price;
+    row.subtotal=Math.round(weight*price);row.subtotalCost=Math.round(weight*row.costPerGram);row.margin=row.subtotal-row.subtotalCost;
     this.renderDispatchTable();
   },
 
@@ -1085,13 +1104,13 @@ const App = {
 
   updateDispatchTotals(totalGrams, totalPesos, grossMargin) {
     const elG = document.getElementById('despacho-total-grams');
-    const elP = document.getElementById('despacho-total-pesos');
+    const elP = document.getElementById('despacho-summary-pesos');
     const elSumG = document.getElementById('despacho-summary-grams');
     const elSumP = document.getElementById('despacho-summary-pesos');
     const elMargin = document.getElementById('despacho-summary-margin');
 
     if (elG) elG.innerText = `${totalGrams.toFixed(2)} g`;
-    if (elP) elP.innerText = `$${totalPesos.toLocaleString('es-CO')}`;
+    if (elP) elP.innerText = `${totalPesos.toLocaleString('es-CO')}`;
     if (elSumG) elSumG.innerText = `${totalGrams.toFixed(2)} g`;
     if (elSumP) elSumP.innerText = `$${totalPesos.toLocaleString('es-CO')}`;
     if (elMargin) {
@@ -1104,7 +1123,7 @@ const App = {
 
   calculatePaymentSettlement(totalAmount) {
     const scrapGrams = parseFloat(document.getElementById('pay-scrap-grams')?.value) || 0;
-    const scrapRate = parseFloat(document.getElementById('pay-scrap-rate')?.value) || (this.rates.retal_oro18k_compra || 255000);
+    const scrapRate = parseFloat(document.getElementById('pay-scrap-rate')?.value) || (this.rates.retal_oro18k_compra ?? 0);
     const scrapDeduction = Math.round(scrapGrams * scrapRate);
 
     const scrapValElem = document.getElementById('pay-scrap-calc');
@@ -1125,6 +1144,9 @@ const App = {
   },
 
   async finalizeDispatch() {
+    if(this.dispatchSubmitting) return;
+    this.dispatchSubmitting=true;
+    try {
     if (this.dispatchCart.length === 0) {
       alert('Debes agregar al menos una pesada al despacho.');
       return;
@@ -1141,7 +1163,7 @@ const App = {
     const totalPesos = this.dispatchCart.reduce((acc, r) => acc + r.subtotal, 0);
 
     const scrapGrams = parseFloat(document.getElementById('pay-scrap-grams')?.value) || 0;
-    const scrapRate = parseFloat(document.getElementById('pay-scrap-rate')?.value) || (this.rates.retal_oro18k_compra || 255000);
+    const scrapRate = parseFloat(document.getElementById('pay-scrap-rate')?.value) || (this.rates.retal_oro18k_compra ?? 0);
     const scrapAmount = Math.round(scrapGrams * scrapRate);
     const cash = parseFloat(document.getElementById('pay-cash-amount')?.value) || 0;
     const transfer = parseFloat(document.getElementById('pay-transfer-amount')?.value) || 0;
@@ -1167,7 +1189,7 @@ const App = {
     };
 
     try {
-      const res = await fetch('/api/orders', {
+      const res = await this.apiFetch('/api/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(orderPayload)
@@ -1186,6 +1208,7 @@ const App = {
       console.error(err);
       alert('Ocurrió un error al procesar el despacho.');
     }
+    } finally { this.dispatchSubmitting=false; }
   },
 
   showRemisionPrintModal(order) {
@@ -1200,30 +1223,29 @@ const App = {
 
     container.innerHTML = `
       <div class="remision-container">
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #1e293b; padding-bottom: 16px; margin-bottom: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #243b33; padding-bottom: 16px; margin-bottom: 20px;">
           <div>
-            <h1 style="font-family: 'Cinzel', serif; font-size: 1.5rem; letter-spacing: 0.05em; margin: 0;">NEXUS POR MAYOR</h1>
-            <p style="font-size: 0.8rem; color: #64748b; margin: 2px 0 0;">Plataforma Mayorista de Joyería en Oro 18K Italiano & Nacional</p>
-            <p style="font-size: 0.75rem; color: #94a3b8;">NIT 901.442.118-9 • Medellín / Bogotá / Bucaramanga</p>
+            <h1 style="font-family: 'Cormorant Garamond', Georgia, serif; font-size: 1.5rem; letter-spacing: 0.05em; margin: 0;"><img src="/assets/aurea-symbol.svg" alt="" style="width:32px;height:32px;vertical-align:middle;margin-right:10px;">áurea <span style="font:500 10px Inter,Arial,sans-serif;letter-spacing:2px;">MAYORISTAS</span></h1>
+            <p style="font-size: 0.8rem; color: #627469; margin: 2px 0 0;">Plataforma Mayorista de Joyería en Oro 18K Italiano & Nacional</p>
           </div>
           <div style="text-align: right;">
-            <div style="font-family: 'JetBrains Mono', monospace; font-size: 1.25rem; font-weight: 800; color: #b45309;">${order.remisionNumber || 'REM'}</div>
-            <div style="font-size: 0.75rem; color: #64748b; margin-top: 4px;">Fecha: ${order.date ? new Date(order.date).toLocaleString('es-CO') : 'Fecha actual'}</div>
-            <div style="font-size: 0.75rem; font-weight: 700; color: #047857; margin-top: 2px;">ESTADO: ${(order.status || 'Pagado').toUpperCase()}</div>
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 1.25rem; font-weight: 800; color: #826a3e;">${order.remisionNumber || 'REM'}</div>
+            <div style="font-size: 0.75rem; color: #627469; margin-top: 4px;">Fecha: ${order.date ? new Date(order.date).toLocaleString('es-CO', {timeZone:'America/Bogota'}) : 'Fecha actual'}</div>
+            <div style="font-size: 0.75rem; font-weight: 700; color: #047857; margin-top: 2px;">ESTADO: ${escapeHTML((order.status || 'Pagado').toUpperCase())}</div>
           </div>
         </div>
 
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; font-size: 0.85rem; background: #f8fafc; padding: 12px; border-radius: 8px;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; font-size: 0.85rem; background: #fafbf7; padding: 12px; border-radius: 8px;">
           <div>
-            <div style="font-size: 0.7rem; color: #64748b; text-transform: uppercase;">Cliente Mayorista:</div>
-            <div style="font-weight: 800; font-size: 0.95rem; color: #0f172a;">${order.clientName || 'Cliente Mayorista'}</div>
-            <div style="color: #475569;">DOC: ${client.documentType || 'NIT'} ${client.documentNumber || ''}</div>
-            <div style="color: #475569;">Tel: ${client.phone || 'Sin registrar'} • ${client.city || 'Colombia'}</div>
+            <div style="font-size: 0.7rem; color: #627469; text-transform: uppercase;">Cliente Mayorista:</div>
+            <div style="font-weight: 800; font-size: 0.95rem; color: #163e35;">${escapeHTML(order.clientName || 'Cliente Mayorista')}</div>
+            <div style="color: #53685e;">DOC: ${escapeHTML(client.documentType || 'NIT')} ${escapeHTML(client.documentNumber || '')}</div>
+            <div style="color: #53685e;">Tel: ${escapeHTML(client.phone || 'Sin registrar')} • ${escapeHTML(client.city || 'Colombia')}</div>
           </div>
           <div style="text-align: right;">
-            <div style="font-size: 0.7rem; color: #64748b; text-transform: uppercase;">Condición de Venta:</div>
-            <div style="font-weight: 800; font-size: 0.95rem; color: #0f172a;">${order.paymentType || 'Contado'}</div>
-            <div style="color: #475569;">Gramos Totales Despachados: <strong>${totalG} g</strong></div>
+            <div style="font-size: 0.7rem; color: #627469; text-transform: uppercase;">Condición de Venta:</div>
+            <div style="font-weight: 800; font-size: 0.95rem; color: #163e35;">${order.paymentType || 'Contado'}</div>
+            <div style="color: #53685e;">Gramos Totales Despachados: <strong>${totalG} g</strong></div>
           </div>
         </div>
 
@@ -1240,10 +1262,10 @@ const App = {
           <tbody>
             ${orderItems.map(it => `
               <tr>
-                <td style="font-family: monospace; font-weight: 700;">${it.code || 'GEN'}</td>
+                <td style="font-family: monospace; font-weight: 700;">${escapeHTML(it.code || 'GEN')}</td>
                 <td>
-                  <strong>${it.name || 'Joyería'}</strong> 
-                  <span style="font-size: 0.75rem; color: #64748b;">(${this.getCategoryBadge(it.category).name})</span>
+                  <strong>${escapeHTML(it.name || 'Joyería')}</strong>
+                  <span style="font-size: 0.75rem; color: #627469;">(${escapeHTML(this.getCategoryBadge(it.category).name)})</span>
                 </td>
                 <td style="text-align: right; font-family: monospace; font-weight: 700;">${Number(it.weightGrams || 0).toFixed(2)} g</td>
                 <td style="text-align: right; font-family: monospace;">$${Number(it.pricePerGram || 0).toLocaleString('es-CO')}</td>
@@ -1253,33 +1275,33 @@ const App = {
           </tbody>
         </table>
 
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-top: 16px; border-top: 2px solid #cbd5e1; padding-top: 16px;">
-          <div style="max-width: 50%; font-size: 0.78rem; color: #64748b;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-top: 16px; border-top: 2px solid #cbd2c9; padding-top: 16px;">
+          <div style="max-width: 50%; font-size: 0.78rem; color: #627469;">
             <p><strong>Desglose de Pago:</strong></p>
             ${(Number(payDetail.cash) || 0) > 0 ? `<p>• Efectivo: $${Number(payDetail.cash).toLocaleString('es-CO')}</p>` : ''}
             ${(Number(payDetail.transfer) || 0) > 0 ? `<p>• Transferencia: $${Number(payDetail.transfer).toLocaleString('es-CO')}</p>` : ''}
-            ${(Number(payDetail.scrapGoldGrams) || 0) > 0 ? `<p style="color: #b45309;">• Retal de Oro 18K Recibido: ${payDetail.scrapGoldGrams}g @ $${Number(payDetail.scrapGoldRate || 0).toLocaleString('es-CO')}/g = $${Number(payDetail.scrapGoldAmount || 0).toLocaleString('es-CO')}</p>` : ''}
+            ${(Number(payDetail.scrapGoldGrams) || 0) > 0 ? `<p style="color: #826a3e;">• Retal de Oro 18K Recibido: ${payDetail.scrapGoldGrams}g @ $${Number(payDetail.scrapGoldRate || 0).toLocaleString('es-CO')}/g = $${Number(payDetail.scrapGoldAmount || 0).toLocaleString('es-CO')}</p>` : ''}
             ${(Number(payDetail.creditAmount) || 0) > 0 ? `<p style="color: #dc2626; font-weight: 700;">• Saldo a Cartera (CxC): $${Number(payDetail.creditAmount).toLocaleString('es-CO')}</p>` : ''}
-            <p style="margin-top: 6px; font-style: italic;">Notas: ${order.notes || 'Sin observaciones'}</p>
+            <p style="margin-top: 6px; font-style: italic;">Notas: ${escapeHTML(order.notes || 'Sin observaciones')}</p>
           </div>
 
           <div style="text-align: right;">
-            <div style="font-size: 0.8rem; color: #64748b;">TOTAL DESPACHO:</div>
-            <div style="font-family: 'JetBrains Mono', monospace; font-size: 1.6rem; font-weight: 900; color: #0f172a;">
+            <div style="font-size: 0.8rem; color: #627469;">TOTAL DESPACHO:</div>
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 1.6rem; font-weight: 900; color: #163e35;">
               $${Number(order.totalAmount || 0).toLocaleString('es-CO')}
             </div>
-            <div style="font-size: 0.85rem; color: #b45309; font-weight: 700; margin-top: 4px;">
+            <div style="font-size: 0.85rem; color: #826a3e; font-weight: 700; margin-top: 4px;">
               PESO TOTAL: ${totalG} GRAMOS
             </div>
           </div>
         </div>
 
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 40px; padding-top: 15px; font-size: 0.8rem; color: #64748b; text-align: center;">
-          <div style="border-top: 1px dashed #94a3b8; padding-top: 8px;">
-            Despachado por: <strong>NEXUS POR MAYOR</strong>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 40px; padding-top: 15px; font-size: 0.8rem; color: #627469; text-align: center;">
+          <div style="border-top: 1px dashed #a0afa4; padding-top: 8px;">
+            Despachado por: <strong>ÁUREA MAYORISTAS</strong>
           </div>
-          <div style="border-top: 1px dashed #94a3b8; padding-top: 8px;">
-            Recibido a conformidad: <strong>${order.clientName}</strong>
+          <div style="border-top: 1px dashed #a0afa4; padding-top: 8px;">
+            Recibido a conformidad: <strong>${escapeHTML(order.clientName)}</strong>
           </div>
         </div>
       </div>
@@ -1318,30 +1340,30 @@ const App = {
     tableBody.innerHTML = list.map(client => {
       const debtPesos = Number(client.currentDebtPesos) || 0;
       const debtGrams = Number(client.currentDebtGrams) || 0;
-      const limit = Number(client.creditLimitPesos) || 50000000;
+      const limit = Number(client.creditLimitPesos ?? 50000000);
       const cleanPhone = (client.phone || '').replace(/[^0-9]/g, '');
 
       return `
         <tr>
           <td>
-            <strong>${client.tradeName || client.name}</strong>
+            <strong>${escapeHTML(client.tradeName || client.name)}</strong>
           </td>
           <td>
-            <div>${client.name}</div>
-            <div style="font-size: 0.72rem; color: var(--text-dim);">${client.documentType || 'NIT'}: ${client.documentNumber || 'S/N'}</div>
+            <div>${escapeHTML(client.name)}</div>
+            <div style="font-size: 0.72rem; color: var(--text-dim);">${escapeHTML(client.documentType || 'NIT')}: ${escapeHTML(client.documentNumber || 'S/N')}</div>
           </td>
           <td>
             ${client.phone ? `
               <a href="https://wa.me/${cleanPhone}" target="_blank" class="whatsapp-badge">
-                💬 ${client.phone}
+                 ${escapeHTML(client.phone)}
               </a>
             ` : '<span style="color: var(--text-dim); font-size: 0.8rem;">Sin teléfono</span>'}
           </td>
-          <td>${client.city || 'Colombia'}</td>
+          <td>${escapeHTML(client.city || 'Colombia')}</td>
           <td class="text-right mono">$${limit.toLocaleString('es-CO')}</td>
           <td>
-            <span class="stat-badge ${client.riskLevel && client.riskLevel.includes('A') ? 'pos' : (client.riskLevel && client.riskLevel.includes('C') ? 'neg' : '')}" style="${client.riskLevel && client.riskLevel.includes('B') ? 'background: rgba(245, 158, 11, 0.2); color: #fbbf24;' : ''}">
-              ${client.riskLevel || 'A - Excelente'}
+            <span class="stat-badge ${escapeHTML(client.riskLevel && client.riskLevel.includes('A') ? 'pos' : (client.riskLevel && client.riskLevel.includes('C') ? 'neg' : ''))}" style="${escapeHTML(client.riskLevel && client.riskLevel.includes('B') ? 'background: rgba(245, 158, 11, 0.2); color: #b79b68;' : '')}">
+              ${escapeHTML(client.riskLevel || 'A - Excelente')}
             </span>
           </td>
           <td class="text-right mono" style="font-weight: 800; color: ${debtPesos > 0 ? '#f87171' : '#34d399'};">
@@ -1351,11 +1373,9 @@ const App = {
           <td class="text-center" style="white-space: nowrap;">
             <div class="table-actions">
               <button class="btn btn-secondary btn-sm" onclick="App.openEditJoyeriaModal('${client.id}')" title="Editar Joyería">
-                ✏️ Editar
+                 Editar
               </button>
-              <button class="btn btn-secondary btn-icon btn-sm" onclick="App.deleteJoyeria('${client.id}')" title="Eliminar Joyería" style="color: #f87171;">
-                🗑️
-              </button>
+              <button class="btn btn-secondary btn-icon btn-sm" onclick="App.deleteJoyeria('${client.id}')" title="Eliminar Joyería" style="color: #f87171;">Eliminar</button>
             </div>
           </td>
         </tr>
@@ -1410,7 +1430,7 @@ const App = {
     const documentNumber = document.getElementById('newcli-doc')?.value.trim() || '';
     const phone = document.getElementById('newcli-phone')?.value.trim() || '';
     const city = document.getElementById('newcli-city')?.value.trim() || '';
-    const creditLimitPesos = parseFloat(document.getElementById('newcli-limit-pesos')?.value) || 50000000;
+    const creditLimitPesos = Number(document.getElementById('newcli-limit-pesos')?.value ?? 50000000);
     const riskLevel = document.getElementById('newcli-risk')?.value || 'A - Excelente';
 
     if (!tradeName) {
@@ -1423,13 +1443,13 @@ const App = {
     try {
       let res;
       if (id) {
-        res = await fetch(`/api/clients/${id}`, {
+        res = await this.apiFetch(`/api/clients/${id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         }).then(r => r.json());
       } else {
-        res = await fetch('/api/clients', {
+        res = await this.apiFetch('/api/clients', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
@@ -1447,7 +1467,8 @@ const App = {
 
         if (res.client && document.getElementById('despacho-client-select')) {
           document.getElementById('despacho-client-select').value = res.client.id;
-          this.handleDespachoClientChange();
+          this.renderDespacho();
+          document.getElementById('despacho-client-select').value = res.client.id;
         }
       } else {
         alert('Error: ' + res.message);
@@ -1470,7 +1491,7 @@ const App = {
     }
 
     try {
-      const res = await fetch(`/api/clients/${id}`, { method: 'DELETE' }).then(r => r.json());
+      const res = await this.apiFetch(`/api/clients/${id}`, { method: 'DELETE' }).then(r => r.json());
       if (res.success) {
         if (window.soundEngine) window.soundEngine.playSuccess();
         alert(res.message || 'Joyería eliminada');
@@ -1519,11 +1540,11 @@ const App = {
       return `
         <tr>
           <td>
-            <strong>${sup.name}</strong>
+            <strong>${escapeHTML(sup.name)}</strong>
           </td>
           <td>
-            <span class="ticker-badge ${sup.category.includes('Italiano') ? 'badge-italian' : (sup.category.includes('24K') ? 'badge-bullion' : 'badge-nacional')}">
-              ${sup.category}
+            <span class="ticker-badge ${escapeHTML(sup.category.includes('Italiano') ? 'badge-italian' : (sup.category.includes('24K') ? 'badge-bullion' : 'badge-nacional'))}">
+              ${escapeHTML(sup.category)}
             </span>
           </td>
           <td class="mono" style="font-weight: 700; color: var(--text-headings);">$${moRate.toLocaleString('es-CO')} /g</td>
@@ -1531,12 +1552,12 @@ const App = {
             <div>${sup.contact || 'Representante'}</div>
             ${sup.phone ? `
               <a href="https://wa.me/${cleanPhone}" target="_blank" class="whatsapp-badge">
-                💬 ${sup.phone}
+                 ${escapeHTML(sup.phone)}
               </a>
             ` : '<span style="color: var(--text-dim); font-size: 0.75rem;">Sin teléfono</span>'}
           </td>
-          <td>${sup.city || 'Nacional'}</td>
-          <td class="text-right mono" style="font-weight: 800; color: #fbbf24;">
+          <td>${escapeHTML(sup.city || 'Nacional')}</td>
+          <td class="text-right mono" style="font-weight: 800; color: #b79b68;">
             ${puroHands.toFixed(2)} g
           </td>
           <td class="text-right mono" style="font-weight: 800; color: #34d399;">
@@ -1549,11 +1570,9 @@ const App = {
           <td class="text-center" style="white-space: nowrap;">
             <div class="table-actions">
               <button class="btn btn-secondary btn-sm" onclick="App.openEditProveedorModal('${sup.id}')" title="Editar Proveedor">
-                ✏️ Editar
+                 Editar
               </button>
-              <button class="btn btn-secondary btn-icon btn-sm" onclick="App.deleteProveedor('${sup.id}')" title="Eliminar Proveedor" style="color: #f87171;">
-                🗑️
-              </button>
+              <button class="btn btn-secondary btn-icon btn-sm" onclick="App.deleteProveedor('${sup.id}')" title="Eliminar Proveedor" style="color: #f87171;">Eliminar</button>
             </div>
           </td>
         </tr>
@@ -1615,13 +1634,13 @@ const App = {
     try {
       let res;
       if (id) {
-        res = await fetch(`/api/suppliers/${id}`, {
+        res = await this.apiFetch(`/api/suppliers/${id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         }).then(r => r.json());
       } else {
-        res = await fetch('/api/suppliers', {
+        res = await this.apiFetch('/api/suppliers', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
@@ -1660,7 +1679,7 @@ const App = {
     }
 
     try {
-      const res = await fetch('/api/suppliers', {
+      const res = await this.apiFetch('/api/suppliers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, category, manoDeObraPerGram, contact: name, phone, city })
@@ -1691,7 +1710,7 @@ const App = {
     }
 
     try {
-      const res = await fetch(`/api/suppliers/${id}`, { method: 'DELETE' }).then(r => r.json());
+      const res = await this.apiFetch(`/api/suppliers/${id}`, { method: 'DELETE' }).then(r => r.json());
       if (res.success) {
         if (window.soundEngine) window.soundEngine.playSuccess();
         alert(res.message || 'Proveedor eliminado');
@@ -1716,23 +1735,23 @@ const App = {
     tableBody.innerHTML = this.clients.map(client => {
       const debtPesos = Number(client.currentDebtPesos) || 0;
       const debtGrams = Number(client.currentDebtGrams) || 0;
-      const creditLimit = Number(client.creditLimitPesos) || 50000000;
+      const creditLimit = Number(client.creditLimitPesos ?? 50000000);
       const usagePct = creditLimit > 0 ? Math.min(100, Math.round((debtPesos / creditLimit) * 100)) : 0;
 
       let statusBadge = `<span class="stat-badge pos">Al Día</span>`;
       if (debtPesos > 0) {
         statusBadge = usagePct > 70 
           ? `<span class="stat-badge neg">Límite Alto (${usagePct}%)</span>` 
-          : `<span class="stat-badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24;">Con Saldo</span>`;
+          : `<span class="stat-badge" style="background: rgba(245, 158, 11, 0.2); color: #b79b68;">Con Saldo</span>`;
       }
 
       return `
         <tr>
           <td>
-            <strong>${client.tradeName || client.name}</strong>
-            <div style="font-size: 0.75rem; color: var(--text-dim);">${client.name} • ${client.documentType}: ${client.documentNumber}</div>
+            <strong>${escapeHTML(client.tradeName || client.name)}</strong>
+            <div style="font-size: 0.75rem; color: var(--text-dim);">${escapeHTML(client.name)} • ${escapeHTML(client.documentType)}: ${escapeHTML(client.documentNumber)}</div>
           </td>
-          <td>${client.city || 'Colombia'}</td>
+          <td>${escapeHTML(client.city || 'Colombia')}</td>
           <td>${statusBadge}</td>
           <td class="text-right mono" style="font-size: 0.85rem; color: var(--text-muted);">$${creditLimit.toLocaleString('es-CO')}</td>
           <td class="text-right mono" style="font-weight: 800; font-size: 1.05rem; color: ${debtPesos > 0 ? '#f87171' : '#34d399'};">
@@ -1743,10 +1762,10 @@ const App = {
           </td>
           <td class="text-center" style="white-space: nowrap;">
             <button class="btn btn-gold btn-sm" onclick="App.openClientCarteraDetail('${client.id}')" title="Ver Cartera a Detalle">
-              🔍 Detalle
+               Detalle
             </button>
             <button class="btn btn-outline-gold btn-sm" onclick="App.openAbonoModal('${client.id}', 'cxc')">
-              💰 Abonar
+               Abonar
             </button>
           </td>
         </tr>
@@ -1838,7 +1857,7 @@ const App = {
     } else if (statusVal === 'limite-alto') {
       list = list.filter(c => {
         const debt = Number(c.currentDebtPesos) || 0;
-        const limit = Number(c.creditLimitPesos) || 50000000;
+        const limit = Number(c.creditLimitPesos ?? 50000000);
         return limit > 0 && (debt / limit) >= 0.7;
       });
     } else if (statusVal === 'riesgo-c') {
@@ -1871,7 +1890,7 @@ const App = {
       if (list.length === 0) {
         cardsContainer.innerHTML = `
           <div class="empty-state-box">
-            <div style="font-size: 2rem; margin-bottom: 8px;">🔍</div>
+            <div style="font-size: 2rem; margin-bottom: 8px;"></div>
             <div style="font-size: 1.05rem; font-weight: 700; color: var(--text-headings);">No se encontraron clientes con los filtros aplicados</div>
             <div style="font-size: 0.85rem; color: var(--text-dim); margin-top: 4px;">Intenta cambiar el término de búsqueda o restablecer los filtros de cartera.</div>
           </div>
@@ -1881,7 +1900,7 @@ const App = {
           const stats = this.getClientCarteraStats(client.id);
           const debtPesos = Number(client.currentDebtPesos) || 0;
           const debtGrams = Number(client.currentDebtGrams) || 0;
-          const creditLimit = Number(client.creditLimitPesos) || 50000000;
+          const creditLimit = Number(client.creditLimitPesos ?? 50000000);
           const usagePct = stats.usagePct;
 
           let cardClass = 'client-cartera-card';
@@ -1890,10 +1909,10 @@ const App = {
 
           let barColor = '#10b981';
           if (usagePct >= 80) barColor = '#ef4444';
-          else if (usagePct >= 50) barColor = '#f59e0b';
+          else if (usagePct >= 50) barColor = '#a18350';
 
           let riskBadge = `<span class="stat-badge pos">A - Excelente</span>`;
-          if ((client.riskLevel || '').startsWith('B')) riskBadge = `<span class="stat-badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24;">B - Normal</span>`;
+          if ((client.riskLevel || '').startsWith('B')) riskBadge = `<span class="stat-badge" style="background: rgba(245, 158, 11, 0.2); color: #b79b68;">B - Normal</span>`;
           else if ((client.riskLevel || '').startsWith('C')) riskBadge = `<span class="stat-badge neg">C - Observación</span>`;
 
           return `
@@ -1903,7 +1922,7 @@ const App = {
                   <div>
                     <div class="cartera-card-title">${client.tradeName || client.name}</div>
                     <div class="cartera-card-sub">${client.name} • ${client.documentType}: ${client.documentNumber}</div>
-                    <div class="cartera-card-sub" style="color: var(--gold-light); font-weight: 600;">📍 ${client.city || 'Colombia'}</div>
+                    <div class="cartera-card-sub" style="color: var(--gold-light); font-weight: 600;"> ${client.city || 'Colombia'}</div>
                   </div>
                   <div>${riskBadge}</div>
                 </div>
@@ -1938,23 +1957,23 @@ const App = {
                   </div>
                   <div class="cartera-metric-cell">
                     <span>Abonado en Retal</span>
-                    <span style="color: #fbbf24;">${stats.totalScrapGrams.toFixed(2)}g ($${stats.totalScrapAmount.toLocaleString('es-CO')})</span>
+                    <span style="color: #b79b68;">${stats.totalScrapGrams.toFixed(2)}g ($${stats.totalScrapAmount.toLocaleString('es-CO')})</span>
                   </div>
                 </div>
               </div>
 
               <div class="cartera-card-actions">
                 <button class="btn btn-gold btn-sm" onclick="App.openClientCarteraDetail('${client.id}')" title="Ver Expediente Completo">
-                  🔍 Ver Cartera
+                   Ver Cartera
                 </button>
                 <button class="btn btn-outline-gold btn-sm" onclick="App.openAbonoModal('${client.id}', 'cxc')" title="Registrar Abono">
-                  💰 Abonar
+                   Abonar
                 </button>
                 <button class="btn btn-outline-gold btn-sm" onclick="App.sendClientWhatsApp('${client.id}')" title="Enviar Estado por WhatsApp">
-                  💬 WhatsApp
+                   WhatsApp
                 </button>
                 <button class="btn btn-secondary btn-sm" onclick="App.openStatementPrintModal('${client.id}')" title="Imprimir Estado de Cuenta">
-                  📄 Estado
+                   Estado
                 </button>
               </div>
             </div>
@@ -1971,15 +1990,15 @@ const App = {
           const stats = this.getClientCarteraStats(client.id);
           const debtPesos = Number(client.currentDebtPesos) || 0;
           const debtGrams = Number(client.currentDebtGrams) || 0;
-          const creditLimit = Number(client.creditLimitPesos) || 50000000;
+          const creditLimit = Number(client.creditLimitPesos ?? 50000000);
           const usagePct = stats.usagePct;
 
           let barColor = '#10b981';
           if (usagePct >= 80) barColor = '#ef4444';
-          else if (usagePct >= 50) barColor = '#f59e0b';
+          else if (usagePct >= 50) barColor = '#a18350';
 
           let riskBadge = `<span class="stat-badge pos">A</span>`;
-          if ((client.riskLevel || '').startsWith('B')) riskBadge = `<span class="stat-badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24;">B</span>`;
+          if ((client.riskLevel || '').startsWith('B')) riskBadge = `<span class="stat-badge" style="background: rgba(245, 158, 11, 0.2); color: #b79b68;">B</span>`;
           else if ((client.riskLevel || '').startsWith('C')) riskBadge = `<span class="stat-badge neg">C</span>`;
 
           return `
@@ -2011,14 +2030,12 @@ const App = {
               <td style="font-size: 0.8rem; color: var(--text-muted);">${client.lastPaymentDate || 'Sin registro'}</td>
               <td class="text-center" style="white-space: nowrap;">
                 <button class="btn btn-gold btn-sm" onclick="App.openClientCarteraDetail('${client.id}')" style="padding: 4px 8px;" title="Ver Detalle de Cartera">
-                  🔍 Detalle
+                   Detalle
                 </button>
                 <button class="btn btn-outline-gold btn-sm" onclick="App.openAbonoModal('${client.id}', 'cxc')" style="padding: 4px 8px;" title="Registrar Abono">
-                  💰 Abonar
+                   Abonar
                 </button>
-                <button class="btn btn-secondary btn-sm" onclick="App.openStatementPrintModal('${client.id}')" style="padding: 4px 8px;" title="Imprimir Estado">
-                  📄
-                </button>
+                <button class="btn btn-secondary btn-sm" onclick="App.openStatementPrintModal('${client.id}')" style="padding: 4px 8px;" title="Imprimir Estado">Estado de cuenta</button>
               </td>
             </tr>
           `;
@@ -2030,7 +2047,7 @@ const App = {
   getClientCarteraStats(clientId) {
     const client = this.clients.find(c => c.id === clientId) || {};
     const clientOrders = (this.orders || []).filter(o => o.clientId === clientId);
-    const clientPayments = (this.payments || []).filter(p => p.entityId === clientId && p.type === 'abono_cxc');
+    const clientPayments = (this.payments || []).filter(p => p.entityId === clientId && p.type === 'abono_cxc' && !String(p.reference||'').startsWith('RETAL-DESPACHO-'));
 
     const totalPurchases = clientOrders.reduce((acc, o) => acc + (Number(o.totalAmount) || 0), 0);
     const totalGramsPurchased = clientOrders.reduce((acc, o) => acc + (Number(o.totalGrams) || 0), 0);
@@ -2040,7 +2057,7 @@ const App = {
     const totalScrapAmount = clientPayments.reduce((acc, p) => acc + (Number(p.scrapGoldEquivalent) || 0), 0);
     const totalCredited = clientPayments.reduce((acc, p) => acc + (Number(p.totalCredited) || 0), 0);
 
-    const creditLimit = Number(client.creditLimitPesos) || 50000000;
+    const creditLimit = Number(client.creditLimitPesos ?? 50000000);
     const currentDebt = Number(client.currentDebtPesos) || 0;
     const availableCredit = Math.max(0, creditLimit - currentDebt);
     const usagePct = creditLimit > 0 ? Math.min(100, Math.round((currentDebt / creditLimit) * 100)) : 0;
@@ -2067,7 +2084,7 @@ const App = {
 
     const ledger = [];
     const clientOrders = (this.orders || []).filter(o => o.clientId === clientId);
-    const clientPayments = (this.payments || []).filter(p => p.entityId === clientId && p.type === 'abono_cxc');
+    const clientPayments = (this.payments || []).filter(p => p.entityId === clientId && p.type === 'abono_cxc' && !String(p.reference||'').startsWith('RETAL-DESPACHO-'));
 
     // Orders with credit
     clientOrders.forEach(o => {
@@ -2136,7 +2153,7 @@ const App = {
     const elName = document.getElementById('mccd-client-name');
     const elDoc = document.getElementById('mccd-client-doc');
     if (elName) elName.innerText = client.tradeName || client.name;
-    if (elDoc) elDoc.innerText = `${client.name} • ${client.documentType || 'NIT'}: ${client.documentNumber} • 📍 ${client.city || 'Colombia'} • Tel: ${client.phone || ''}`;
+    if (elDoc) elDoc.innerText = `${client.name} • ${client.documentType || 'NIT'}: ${client.documentNumber} •  ${client.city || 'Colombia'} • Tel: ${client.phone || ''}`;
 
     const stats = this.getClientCarteraStats(clientId);
 
@@ -2229,9 +2246,9 @@ const App = {
 
       return `
         <tr>
-          <td style="font-size: 0.78rem; color: var(--text-muted);">${new Date(item.date).toLocaleString('es-CO')}</td>
+          <td style="font-size: 0.78rem; color: var(--text-muted);">${new Date(item.date).toLocaleString('es-CO', {timeZone:'America/Bogota'})}</td>
           <td class="mono" style="font-weight: 700; color: var(--gold-primary);">${item.ref}</td>
-          <td style="max-width: 300px; font-size: 0.82rem;">${item.concept}</td>
+          <td style="max-width: 300px; font-size: 0.82rem;">${escapeHTML(item.concept)}</td>
           <td>${badge}</td>
           <td class="text-right mono">${item.grams > 0 ? item.grams.toFixed(2) + ' g' : '-'}</td>
           <td class="text-right mono" style="font-weight: 700; color: ${item.debit > 0 ? '#f87171' : 'inherit'};">
@@ -2267,7 +2284,7 @@ const App = {
       return `
         <tr>
           <td class="mono" style="font-weight: 700; color: var(--gold-primary);">${order.remisionNumber}</td>
-          <td style="font-size: 0.8rem; color: var(--text-muted);">${new Date(order.date).toLocaleDateString('es-CO')}</td>
+          <td style="font-size: 0.8rem; color: var(--text-muted);">${new Date(order.date).toLocaleDateString('es-CO', {timeZone:'America/Bogota'})}</td>
           <td class="text-right mono" style="font-weight: 700; color: var(--gold-light);">${(order.totalGrams || 0).toFixed(2)} g</td>
           <td class="text-right mono" style="font-weight: 700;">$${order.totalAmount.toLocaleString('es-CO')}</td>
           <td class="text-right mono" style="color: #34d399;">$${paidCash.toLocaleString('es-CO')}</td>
@@ -2275,11 +2292,11 @@ const App = {
             $${creditAmt.toLocaleString('es-CO')}
           </td>
           <td>
-            <span class="stat-badge ${order.status === 'Pagado' ? 'pos' : 'neg'}">${order.status}</span>
+            <span class="stat-badge ${escapeHTML(order.status === 'Pagado' ? 'pos' : 'neg')}">${escapeHTML(order.status)}</span>
           </td>
           <td class="text-center">
             <button class="btn btn-secondary btn-sm" onclick="App.showRemisionPrintModal(App.orders.find(o => o.id === '${order.id}'))">
-              📄
+
             </button>
           </td>
         </tr>
@@ -2291,7 +2308,7 @@ const App = {
     const tbody = document.getElementById('mccd-abonos-tbody');
     if (!tbody) return;
 
-    const clientPayments = (this.payments || []).filter(p => p.entityId === clientId && p.type === 'abono_cxc');
+    const clientPayments = (this.payments || []).filter(p => p.entityId === clientId && p.type === 'abono_cxc' && !String(p.reference||'').startsWith('RETAL-DESPACHO-'));
 
     if (clientPayments.length === 0) {
       tbody.innerHTML = `<tr><td colspan="7" class="text-center" style="padding: 30px;">No hay abonos registrados para este cliente</td></tr>`;
@@ -2305,17 +2322,17 @@ const App = {
 
       return `
         <tr>
-          <td class="mono" style="font-weight: 700; color: var(--gold-primary);">${p.reference || 'ABN'}</td>
-          <td style="font-size: 0.8rem; color: var(--text-muted);">${new Date(p.date).toLocaleDateString('es-CO')}</td>
+          <td class="mono" style="font-weight: 700; color: var(--gold-primary);">${escapeHTML(p.reference || 'ABN')}</td>
+          <td style="font-size: 0.8rem; color: var(--text-muted);">${new Date(p.date).toLocaleDateString('es-CO', {timeZone:'America/Bogota'})}</td>
           <td><strong>${p.paymentMethod || 'Efectivo'}</strong></td>
-          <td class="text-right mono" style="font-weight: 700; color: #fbbf24;">
+          <td class="text-right mono" style="font-weight: 700; color: #b79b68;">
             ${scrapGrams > 0 ? scrapGrams.toFixed(2) + ' g' : '-'}
           </td>
           <td class="text-right mono">${scrapRate > 0 ? '$' + scrapRate.toLocaleString('es-CO') : '-'}</td>
           <td class="text-right mono" style="font-weight: 800; color: #34d399; font-size: 1rem;">
             $${totalCred.toLocaleString('es-CO')}
           </td>
-          <td style="font-size: 0.8rem; color: var(--text-muted); max-width: 250px;">${p.notes || '-'}</td>
+          <td style="font-size: 0.8rem; color: var(--text-muted); max-width: 250px;">${escapeHTML(p.notes || '-')}</td>
         </tr>
       `;
     }).join('');
@@ -2347,11 +2364,11 @@ const App = {
     const debtPesos = Number(client.currentDebtPesos) || 0;
     const debtGrams = Number(client.currentDebtGrams) || 0;
 
-    let msg = `Hola, cordial saludo de *Nexus por Mayor*. `
+    let msg = `Hola, cordial saludo de *Áurea Mayoristas*. `
       + `Compartimos el estado actualizado de cartera para *${client.tradeName || client.name}*:\n\n`
-      + `💰 *Saldo Pendiente:* $${debtPesos.toLocaleString('es-CO')} COP\n`
-      + `⚖️ *Equivalente en Oro 18K:* ${debtGrams.toFixed(2)} g\n`
-      + `📅 *Fecha:* ${new Date().toLocaleDateString('es-CO')}\n\n`
+      + ` *Saldo Pendiente:* $${debtPesos.toLocaleString('es-CO')} COP\n`
+      + ` *Equivalente en Oro 18K:* ${debtGrams.toFixed(2)} g\n`
+      + ` *Fecha:* ${new Date().toLocaleDateString('es-CO', {timeZone:'America/Bogota'})}\n\n`
       + `Recuerda que recibimos abonos mediante transferencia bancaria o en *retal de oro 18K físico* valorizado a tasa del día. ¡Quedamos atentos!`;
 
     const url = `https://wa.me/${phoneClean ? phoneClean : ''}?text=${encodeURIComponent(msg)}`;
@@ -2374,31 +2391,30 @@ const App = {
     container.innerHTML = `
       <div class="statement-doc">
         <!-- Header -->
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #0f172a; padding-bottom: 16px; margin-bottom: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #163e35; padding-bottom: 16px; margin-bottom: 20px;">
           <div>
-            <h1 style="font-family: 'Cinzel', serif; font-size: 1.5rem; letter-spacing: 0.05em; margin: 0; color: #0f172a;">NEXUS POR MAYOR</h1>
-            <p style="font-size: 0.8rem; color: #475569; margin: 2px 0 0;">Sistema de Gestión Mayorista de Joyería en Oro 18K Italiano & Nacional</p>
-            <p style="font-size: 0.75rem; color: #64748b; margin: 2px 0 0;">NIT 901.442.118-9 • Medellín / Bogotá / Bucaramanga • PBX: +57 (4) 448-9210</p>
+            <h1 style="font-family: 'Cormorant Garamond', Georgia, serif; font-size: 1.5rem; letter-spacing: 0.05em; margin: 0; color: #163e35;"><img src="/assets/aurea-symbol.svg" alt="" style="width:32px;height:32px;vertical-align:middle;margin-right:10px;">áurea <span style="font:500 10px Inter,Arial,sans-serif;letter-spacing:2px;">MAYORISTAS</span></h1>
+            <p style="font-size: 0.8rem; color: #53685e; margin: 2px 0 0;">Sistema de Gestión Mayorista de Joyería en Oro 18K Italiano & Nacional</p>
           </div>
           <div style="text-align: right;">
-            <div style="font-size: 1.15rem; font-weight: 800; color: #b45309; text-transform: uppercase;">ESTADO DE CUENTA DE CARTERA</div>
-            <div style="font-size: 0.78rem; color: #64748b; margin-top: 4px;">Fecha de Expedición: ${new Date().toLocaleDateString('es-CO')}</div>
-            <div style="font-size: 0.75rem; color: #64748b;">Hora: ${new Date().toLocaleTimeString('es-CO')}</div>
+            <div style="font-size: 1.15rem; font-weight: 800; color: #826a3e; text-transform: uppercase;">ESTADO DE CUENTA DE CARTERA</div>
+            <div style="font-size: 0.78rem; color: #627469; margin-top: 4px;">Fecha de Expedición: ${new Date().toLocaleDateString('es-CO', {timeZone:'America/Bogota'})}</div>
+            <div style="font-size: 0.75rem; color: #627469;">Hora: ${new Date().toLocaleTimeString('es-CO')}</div>
           </div>
         </div>
 
         <!-- Client Box -->
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; margin-bottom: 20px;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; background: #fafbf7; border: 1px solid #dddfd7; border-radius: 8px; padding: 14px; margin-bottom: 20px;">
           <div>
-            <div style="font-size: 0.7rem; color: #64748b; text-transform: uppercase; font-weight: 700;">Titular & Joyería:</div>
-            <div style="font-size: 1.05rem; font-weight: 800; color: #0f172a;">${client.tradeName || client.name}</div>
-            <div style="font-size: 0.82rem; color: #334155;">Representante: ${client.name}</div>
-            <div style="font-size: 0.82rem; color: #334155;">${client.documentType}: ${client.documentNumber}</div>
+            <div style="font-size: 0.7rem; color: #627469; text-transform: uppercase; font-weight: 700;">Titular & Joyería:</div>
+            <div style="font-size: 1.05rem; font-weight: 800; color: #163e35;">${escapeHTML(client.tradeName || client.name)}</div>
+            <div style="font-size: 0.82rem; color: #334155;">Representante: ${escapeHTML(client.name)}</div>
+            <div style="font-size: 0.82rem; color: #334155;">${escapeHTML(client.documentType)}: ${escapeHTML(client.documentNumber)}</div>
           </div>
           <div style="text-align: right;">
-            <div style="font-size: 0.7rem; color: #64748b; text-transform: uppercase; font-weight: 700;">Contacto & Ubicación:</div>
-            <div style="font-size: 0.85rem; color: #334155;">📍 ${client.city || 'Colombia'}</div>
-            <div style="font-size: 0.85rem; color: #334155;">📞 Tel: ${client.phone || 'N/A'}</div>
+            <div style="font-size: 0.7rem; color: #627469; text-transform: uppercase; font-weight: 700;">Contacto & Ubicación:</div>
+            <div style="font-size: 0.85rem; color: #334155;"> ${escapeHTML(client.city || 'Colombia')}</div>
+            <div style="font-size: 0.85rem; color: #334155;"> Tel: ${escapeHTML(client.phone || 'N/A')}</div>
             <div style="font-size: 0.85rem; color: #334155;">Cupo Asignado: <strong>$${stats.creditLimit.toLocaleString('es-CO')}</strong></div>
           </div>
         </div>
@@ -2409,9 +2425,9 @@ const App = {
             <div style="font-size: 0.72rem; color: #991b1b; text-transform: uppercase; font-weight: 700;">Saldo Total a Pagar</div>
             <div style="font-size: 1.4rem; font-weight: 800; color: #dc2626; font-family: monospace;">$${debtPesos.toLocaleString('es-CO')}</div>
           </div>
-          <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; padding: 12px; text-align: center;">
-            <div style="font-size: 0.72rem; color: #92400e; text-transform: uppercase; font-weight: 700;">Equivalente en Oro 18K</div>
-            <div style="font-size: 1.4rem; font-weight: 800; color: #b45309; font-family: monospace;">${debtGrams.toFixed(2)} g</div>
+          <div style="background: #f6f3e9; border: 1px solid #fde68a; border-radius: 6px; padding: 12px; text-align: center;">
+            <div style="font-size: 0.72rem; color: #6c5731; text-transform: uppercase; font-weight: 700;">Equivalente en Oro 18K</div>
+            <div style="font-size: 1.4rem; font-weight: 800; color: #826a3e; font-family: monospace;">${debtGrams.toFixed(2)} g</div>
           </div>
           <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; padding: 12px; text-align: center;">
             <div style="font-size: 0.72rem; color: #166534; text-transform: uppercase; font-weight: 700;">Cupo Disponible</div>
@@ -2420,7 +2436,7 @@ const App = {
         </div>
 
         <!-- Statement Movement Table -->
-        <h4 style="font-size: 0.95rem; margin: 0 0 8px; color: #0f172a; text-transform: uppercase;">Detalle de Movimientos Recientes</h4>
+        <h4 style="font-size: 0.95rem; margin: 0 0 8px; color: #163e35; text-transform: uppercase;">Detalle de Movimientos Recientes</h4>
         <table class="statement-table">
           <thead>
             <tr>
@@ -2436,9 +2452,9 @@ const App = {
           <tbody>
             ${ledger.length === 0 ? '<tr><td colspan="7" style="text-align: center; padding: 20px;">Sin movimientos registrados</td></tr>' : ledger.map(m => `
               <tr>
-                <td>${new Date(m.date).toLocaleDateString('es-CO')}</td>
+                <td>${new Date(m.date).toLocaleDateString('es-CO', {timeZone:'America/Bogota'})}</td>
                 <td style="font-weight: 700; font-family: monospace;">${m.ref}</td>
-                <td>${m.concept}</td>
+                <td>${escapeHTML(m.concept)}</td>
                 <td style="text-align: right; font-family: monospace;">${m.grams > 0 ? m.grams.toFixed(2) + 'g' : '-'}</td>
                 <td style="text-align: right; font-family: monospace; color: ${m.debit > 0 ? '#b91c1c' : 'inherit'};">
                   ${m.debit > 0 ? '$' + m.debit.toLocaleString('es-CO') : '-'}
@@ -2455,15 +2471,16 @@ const App = {
         </table>
 
         <!-- Payment Channels Notice -->
-        <div style="margin-top: 24px; padding: 12px; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 6px; font-size: 0.8rem; color: #475569;">
+        <div style="margin-top: 24px; padding: 12px; background: #fafbf7; border: 1px dashed #cbd2c9; border-radius: 6px; font-size: 0.8rem; color: #53685e;">
           <strong>Opciones de Cancelación y Pago de Cartera:</strong><br>
-          1. Transferencia Bancaria a Bancolombia Cta Corriente # 031-442-990-11 a nombre de Nexus Joyería S.A.S.<br>
+          1. Medios de transferencia habilitados:
+          ${(this.paymentMethods || []).filter(method=>method.type==='Transferencia'&&method.status==='activo').map(method=>escapeHTML(method.name)+(method.accountNumber?' · Cuenta '+escapeHTML(method.accountNumber):'')+(method.accountHolder?' · Titular: '+escapeHTML(method.accountHolder):'')).join('<br>') || 'Consulta los medios de pago con la joyería.'}<br>
           2. Abono en Retal / Oro Chatarra 18K recibido y pesado en báscula certificada a la tasa oficial de retal del día.<br>
           3. Efectivo en Bóveda Principal. Favor remitir soporte de pago al WhatsApp de tesorería.
         </div>
 
-        <div style="display: flex; justify-content: space-between; margin-top: 40px; padding-top: 20px; border-top: 1px solid #cbd5e1; font-size: 0.78rem; color: #64748b;">
-          <div>Elaborado por: <strong>Dpto. de Cartera & Bóveda Nexus</strong></div>
+        <div style="display: flex; justify-content: space-between; margin-top: 40px; padding-top: 20px; border-top: 1px solid #cbd2c9; font-size: 0.78rem; color: #627469;">
+          <div>Elaborado por: <strong>Cartera y bóveda · Áurea</strong></div>
           <div>Recibido y Aceptado por Joyería: _____________________________</div>
         </div>
       </div>
@@ -2497,16 +2514,16 @@ const App = {
       return `
         <tr>
           <td>
-            <strong>${sup.name}</strong>
-            <div style="font-size: 0.75rem; color: var(--text-dim);">${sup.contact} • Tel: ${sup.phone}</div>
+            <strong>${escapeHTML(sup.name)}</strong>
+            <div style="font-size: 0.75rem; color: var(--text-dim);">${sup.contact} • Tel: ${escapeHTML(sup.phone)}</div>
           </td>
           <td>
-            <span class="ticker-badge ${sup.category.includes('Italiano') ? 'badge-italian' : 'badge-nacional'}">
-              ${sup.category}
+            <span class="ticker-badge ${escapeHTML(sup.category.includes('Italiano') ? 'badge-italian' : 'badge-nacional')}">
+              ${escapeHTML(sup.category)}
             </span>
           </td>
           <td class="mono">$${moRate.toLocaleString('es-CO')} /g</td>
-          <td class="text-right mono" style="font-weight: 800; color: #fbbf24;">
+          <td class="text-right mono" style="font-weight: 800; color: #b79b68;">
             ${puroHands.toFixed(2)} g
           </td>
           <td class="text-right mono" style="font-weight: 800; color: #34d399;">
@@ -2521,7 +2538,7 @@ const App = {
           </td>
           <td class="text-center">
             <button class="btn btn-outline-gold btn-sm" onclick="App.openAbonoModal('${sup.id}', 'cxp')">
-              💳 Pagar
+               Pagar
             </button>
           </td>
         </tr>
@@ -2543,16 +2560,16 @@ const App = {
       return `
         <tr>
           <td class="mono" style="font-weight: 800; color: var(--gold-primary);">${order.remisionNumber || 'REM'}</td>
-          <td>${order.date ? new Date(order.date).toLocaleDateString('es-CO') : '-'}</td>
-          <td><strong>${order.clientName || 'Cliente'}</strong></td>
+          <td>${order.date ? new Date(order.date).toLocaleDateString('es-CO', {timeZone:'America/Bogota'}) : '-'}</td>
+          <td><strong>${escapeHTML(order.clientName || 'Cliente')}</strong></td>
           <td class="text-right mono" style="font-weight: 700; color: var(--gold-light);">${Number(order.totalGrams || 0).toFixed(2)} g</td>
           <td class="text-right mono" style="font-weight: 800; color: var(--text-headings);">$${Number(order.totalAmount || 0).toLocaleString('es-CO')}</td>
           <td>
-            <span class="stat-badge ${order.status === 'Pagado' ? 'pos' : 'neg'}">${order.status || 'Pendiente'}</span>
+            <span class="stat-badge ${escapeHTML(order.status === 'Pagado' ? 'pos' : 'neg')}">${escapeHTML(order.status || 'Pendiente')}</span>
           </td>
           <td class="text-center">
             <button class="btn btn-secondary btn-sm" onclick="App.showRemisionPrintModal(App.orders.find(o => o.id === '${order.id}'))">
-              📄 Ver Remisión
+               Ver Remisión
             </button>
           </td>
         </tr>
@@ -2626,7 +2643,7 @@ const App = {
     if (list.length === 0) {
       grid.innerHTML = `
         <div class="empty-state-box">
-          <div style="font-size: 2.2rem; margin-bottom: 12px;">💳</div>
+          <div style="font-size: 2.2rem; margin-bottom: 12px;"></div>
           <h4 style="color: var(--text-headings); margin-bottom: 6px;">No se encontraron métodos de pago</h4>
           <p style="font-size: 0.85rem; margin-bottom: 16px;">Prueba ajustando los filtros o registra uno nuevo.</p>
           <button class="btn btn-gold btn-sm" onclick="App.openNewPaymentMethodModal()">+ Registrar Nuevo Método</button>
@@ -2641,7 +2658,7 @@ const App = {
       const isCash = pm.type === 'Efectivo';
       const isScrap = pm.type === 'Retal Oro';
 
-      const icon = isTransfer ? '🏦' : (isCash ? '💵' : (isCredit ? '⏳' : '♻️'));
+      const icon = isTransfer ? '' : (isCash ? '' : (isCredit ? '' : ''));
       const badgeClass = isTransfer ? 'badge-italian' : (isCredit ? 'badge-nacional' : (isScrap ? 'badge-retal' : 'badge-bullion'));
       const isActive = pm.status === 'activo';
 
@@ -2650,15 +2667,15 @@ const App = {
         detailsHtml = `
           <div class="pm-detail-item">
             <span class="pm-detail-label">Entidad:</span>
-            <span class="pm-detail-val">${pm.bank || 'Banco'} (${pm.accountType || 'Corriente'})</span>
+            <span class="pm-detail-val">${escapeHTML(pm.bank || 'Banco')} (${escapeHTML(pm.accountType || 'Corriente')})</span>
           </div>
           <div class="pm-detail-item">
             <span class="pm-detail-label">N° Cuenta:</span>
             <span class="pm-detail-val mono">
-              ${pm.accountNumber || 'S/N'}
+              ${escapeHTML(pm.accountNumber || 'S/N')}
               ${pm.accountNumber ? `
-                <button class="pm-copy-btn" onclick="App.copyToClipboard('${pm.accountNumber}', '¡Número de cuenta copiado!')" title="Copiar cuenta">
-                  📋 Copiar
+                <button class="pm-copy-btn" onclick="App.copyToClipboard('${escapeHTML(pm.accountNumber)}', '¡Número de cuenta copiado!')" title="Copiar cuenta">
+                   Copiar
                 </button>
               ` : ''}
             </span>
@@ -2666,13 +2683,13 @@ const App = {
           ${pm.accountHolder ? `
             <div class="pm-detail-item">
               <span class="pm-detail-label">Titular:</span>
-              <span class="pm-detail-val">${pm.accountHolder}</span>
+              <span class="pm-detail-val">${escapeHTML(pm.accountHolder)}</span>
             </div>
           ` : ''}
           ${pm.documentId ? `
             <div class="pm-detail-item">
               <span class="pm-detail-label">Documento:</span>
-              <span class="pm-detail-val mono" style="font-size: 0.78rem;">${pm.documentId}</span>
+              <span class="pm-detail-val mono" style="font-size: 0.78rem;">${escapeHTML(pm.documentId)}</span>
             </div>
           ` : ''}
         `;
@@ -2695,7 +2712,7 @@ const App = {
         detailsHtml = `
           <div class="pm-detail-item">
             <span class="pm-detail-label">Sede / Ubicación:</span>
-            <span class="pm-detail-val">${pm.accountHolder || 'Caja Central'}</span>
+            <span class="pm-detail-val">${escapeHTML(pm.accountHolder || 'Caja Central')}</span>
           </div>
           <div class="pm-detail-item">
             <span class="pm-detail-label">Moneda:</span>
@@ -2714,7 +2731,7 @@ const App = {
           </div>
           <div class="pm-detail-item">
             <span class="pm-detail-label">Tasa Liquidación:</span>
-            <span class="pm-detail-val mono">$${(this.rates.retal_oro18k_compra || 255000).toLocaleString('es-CO')}/g</span>
+            <span class="pm-detail-val mono">$${(this.rates.retal_oro18k_compra ?? 0).toLocaleString('es-CO')}/g</span>
           </div>
           <div class="pm-detail-item">
             <span class="pm-detail-label">Ensayo:</span>
@@ -2730,10 +2747,10 @@ const App = {
               <div style="display: flex; gap: 12px; align-items: center;">
                 <div class="pm-icon-wrap">${icon}</div>
                 <div>
-                  <div class="pm-card-title">${pm.name}</div>
+                  <div class="pm-card-title">${escapeHTML(pm.name)}</div>
                   <div class="pm-meta-row">
-                    <span class="ticker-badge ${badgeClass}">${pm.type}</span>
-                    ${pm.isDefault ? `<span class="ticker-badge badge-bullion" style="font-size: 0.68rem;">⭐ Predeterminado</span>` : ''}
+                    <span class="ticker-badge ${badgeClass}">${escapeHTML(pm.type)}</span>
+                    ${pm.isDefault ? `<span class="ticker-badge badge-bullion" style="font-size: 0.68rem;"> Predeterminado</span>` : ''}
                   </div>
                 </div>
               </div>
@@ -2745,7 +2762,7 @@ const App = {
 
             ${pm.instructions ? `
               <div class="pm-instructions">
-                <strong>Nota:</strong> ${pm.instructions}
+                <strong>Nota:</strong> ${escapeHTML(pm.instructions)}
               </div>
             ` : ''}
           </div>
@@ -2757,11 +2774,9 @@ const App = {
 
             <div style="display: flex; gap: 8px;">
               <button class="btn btn-secondary btn-sm" onclick="App.openEditPaymentMethodModal('${pm.id}')" title="Editar Método de Pago">
-                ✏️ Editar
+                 Editar
               </button>
-              <button class="btn btn-secondary btn-icon btn-sm" onclick="App.deletePaymentMethod('${pm.id}')" title="Eliminar Método de Pago" style="color: #f87171;">
-                🗑️
-              </button>
+              <button class="btn btn-secondary btn-icon btn-sm" onclick="App.deletePaymentMethod('${pm.id}')" title="Eliminar Método de Pago" style="color: #f87171;">Eliminar</button>
             </div>
           </div>
         </div>
@@ -2874,13 +2889,13 @@ const App = {
     try {
       let res;
       if (id) {
-        res = await fetch(`/api/payment-methods/${id}`, {
+        res = await this.apiFetch(`/api/payment-methods/${id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         }).then(r => r.json());
       } else {
-        res = await fetch('/api/payment-methods', {
+        res = await this.apiFetch('/api/payment-methods', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
@@ -2903,7 +2918,7 @@ const App = {
 
   async togglePaymentMethodStatus(id) {
     try {
-      const res = await fetch(`/api/payment-methods/${id}/toggle`, { method: 'PATCH' }).then(r => r.json());
+      const res = await this.apiFetch(`/api/payment-methods/${id}/toggle`, { method: 'PATCH' }).then(r => r.json());
       if (res.success) {
         if (window.soundEngine) window.soundEngine.playChime();
         await this.refreshAllData();
@@ -2923,7 +2938,7 @@ const App = {
     }
 
     try {
-      const res = await fetch(`/api/payment-methods/${id}`, { method: 'DELETE' }).then(r => r.json());
+      const res = await this.apiFetch(`/api/payment-methods/${id}`, { method: 'DELETE' }).then(r => r.json());
       if (res.success) {
         if (window.soundEngine) window.soundEngine.playSuccess();
         alert(res.message || 'Método de pago eliminado.');
@@ -2974,7 +2989,7 @@ const App = {
     }
 
     try {
-      const res = await fetch('/api/puro/purchase', {
+      const res = await this.apiFetch('/api/puro/purchase', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ grams, costPerGram, supplierId, invoiceRef, notes })
@@ -3027,7 +3042,7 @@ const App = {
     }
 
     try {
-      const res = await fetch('/api/puro/deliver', {
+      const res = await this.apiFetch('/api/puro/deliver', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ supplierId, grams24k, notes })
@@ -3086,7 +3101,7 @@ const App = {
     }
 
     try {
-      const res = await fetch('/api/puro/receive', {
+      const res = await this.apiFetch('/api/puro/receive', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -3127,8 +3142,8 @@ const App = {
     document.getElementById('abono-type').value = isCxC ? 'abono_cxc' : 'pago_cxp';
     document.getElementById('abono-entity-id').value = entityId;
     document.getElementById('abono-entity-title').innerText = isCxC 
-      ? `Abonar a Cartera: ${entity.tradeName || entity.name}`
-      : `Registrar Pago a Proveedor/Taller: ${entity.name}`;
+      ? `Abonar a Cartera: ${escapeHTML(entity.tradeName || entity.name)}`
+      : `Registrar Pago a Proveedor/Taller: ${escapeHTML(entity.name)}`;
 
     const debtPesos = isCxC ? entity.currentDebtPesos : entity.balanceDuePesos;
     const debtGrams = isCxC ? entity.currentDebtGrams : entity.balanceDueGrams;
@@ -3141,17 +3156,17 @@ const App = {
     if (methodSelect && this.paymentMethods && this.paymentMethods.length > 0) {
       const activeMethods = this.paymentMethods.filter(m => m.status === 'activo');
       methodSelect.innerHTML = activeMethods.map(m => {
-        const icon = m.type === 'Transferencia' ? '🏦' : (m.type === 'Efectivo' ? '💵' : (m.type === 'Credito' ? '⏳' : '♻️'));
-        const extra = m.bank ? ` - ${m.bank}` : '';
-        return `<option value="${m.name}">${icon} ${m.name}${extra}</option>`;
-      }).join('') + `<option value="Mixto">🔀 Pago Mixto (Efectivo + Oro/Transf)</option>`;
+        const icon = m.type === 'Transferencia' ? '' : (m.type === 'Efectivo' ? '' : (m.type === 'Credito' ? '' : ''));
+        const extra = m.bank ? ` - ${escapeHTML(m.bank)}` : '';
+        return `<option value="${escapeHTML(m.name)}">${icon} ${escapeHTML(m.name)}${extra}</option>`;
+      }).join('') + `<option value="Mixto"> Pago Mixto (Efectivo + Oro/Transf)</option>`;
     }
 
     // Reset and populate scrap inputs
     const scrapInput = document.getElementById('abono-scrap-grams');
     if (scrapInput) scrapInput.value = '';
     const rateInput = document.getElementById('abono-scrap-rate');
-    if (rateInput) rateInput.value = this.rates.retal_oro18k_compra || 255000;
+    if (rateInput) rateInput.value = this.rates.retal_oro18k_compra ?? 0;
     const cashInput = document.getElementById('abono-cash-amount');
     if (cashInput) cashInput.value = '';
     const refInput = document.getElementById('abono-reference');
@@ -3163,7 +3178,7 @@ const App = {
 
   recalcAbonoTotal() {
     const scrapG = parseFloat(document.getElementById('abono-scrap-grams')?.value) || 0;
-    const scrapRate = parseFloat(document.getElementById('abono-scrap-rate')?.value) || (this.rates.retal_oro18k_compra || 255000);
+    const scrapRate = parseFloat(document.getElementById('abono-scrap-rate')?.value) || (this.rates.retal_oro18k_compra ?? 0);
     const scrapVal = Math.round(scrapG * scrapRate);
 
     const calcEl = document.getElementById('abono-scrap-val-calc');
@@ -3179,7 +3194,7 @@ const App = {
     const entityId = document.getElementById('abono-entity-id').value;
     const cashVal = parseFloat(document.getElementById('abono-cash-amount')?.value) || 0;
     const scrapG = parseFloat(document.getElementById('abono-scrap-grams')?.value) || 0;
-    const scrapRate = parseFloat(document.getElementById('abono-scrap-rate')?.value) || (this.rates.retal_oro18k_compra || 255000);
+    const scrapRate = parseFloat(document.getElementById('abono-scrap-rate')?.value) || (this.rates.retal_oro18k_compra ?? 0);
     const method = document.getElementById('abono-method-select')?.value || 'Efectivo';
     const reference = document.getElementById('abono-reference')?.value || '';
 
@@ -3189,7 +3204,7 @@ const App = {
     }
 
     try {
-      const res = await fetch('/api/payments', {
+      const res = await this.apiFetch('/api/payments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -3254,7 +3269,7 @@ const App = {
     }
 
     try {
-      const res = await fetch('/api/items', {
+      const res = await this.apiFetch('/api/items', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -3301,7 +3316,7 @@ const App = {
     if (customDiv) {
       customDiv.style.display = period === 'custom' ? 'flex' : 'none';
       if (period === 'custom' && !document.getElementById('cuadre-start-date').value) {
-        const today = new Date().toISOString().split('T')[0];
+        const today = AureaSafe.dateKey();
         document.getElementById('cuadre-start-date').value = today;
         document.getElementById('cuadre-end-date').value = today;
       }
@@ -3339,7 +3354,7 @@ const App = {
       if (this.cuadrePeriod === 'custom' && this.cuadreCustomStart && this.cuadreCustomEnd) {
         url += `&startDate=${this.cuadreCustomStart}&endDate=${this.cuadreCustomEnd}`;
       }
-      const res = await fetch(url).then(r => r.json());
+      const res = await this.apiFetch(url).then(r => r.json());
       if (res.success) {
         this.cuadreData = res;
       }
@@ -3372,7 +3387,7 @@ const App = {
 
     if (elIn) elIn.innerText = `$${(summary.totalInflows || 0).toLocaleString('es-CO')}`;
     if (elInSub) elInSub.innerText = `Efectivo: $${(summary.inflowsBreakdown.cash || 0).toLocaleString('es-CO')} | Bancos: $${(summary.inflowsBreakdown.transfer || 0).toLocaleString('es-CO')}`;
-    if (elScrapIn) elScrapIn.innerText = `♻️ Retal 18K recibido: ${(summary.inflowsBreakdown.scrapGoldGrams || 0).toFixed(2)}g ($${(summary.inflowsBreakdown.scrapGold || 0).toLocaleString('es-CO')})`;
+    if (elScrapIn) elScrapIn.innerText = ` Retal 18K recibido: ${(summary.inflowsBreakdown.scrapGoldGrams || 0).toFixed(2)}g ($${(summary.inflowsBreakdown.scrapGold || 0).toLocaleString('es-CO')})`;
 
     if (elOut) elOut.innerText = `$${(summary.totalOutflows || 0).toLocaleString('es-CO')}`;
     if (elOutSub) elOutSub.innerText = `Puro 24K: $${(summary.outflowsBreakdown.puro24k || 0).toLocaleString('es-CO')} | Talleres M.O: $${(summary.outflowsBreakdown.manoDeObra || 0).toLocaleString('es-CO')}`;
@@ -3402,14 +3417,14 @@ const App = {
           const isBank = mb.method.toLowerCase().includes('bancolombia') || mb.method.toLowerCase().includes('davivienda') || mb.method.toLowerCase().includes('transferencia');
           const isCash = mb.method.toLowerCase().includes('efectivo');
           const isScrap = mb.method.toLowerCase().includes('retal');
-          const icon = isBank ? '🏦' : (isCash ? '💵' : (isScrap ? '♻️' : '💳'));
+          const icon = isBank ? '' : (isCash ? '' : (isScrap ? '' : ''));
 
           return `
             <div class="cuadre-method-row">
               <div style="display: flex; align-items: center; gap: 10px;">
                 <span style="font-size: 1.25rem;">${icon}</span>
                 <div>
-                  <div style="font-weight: 700; color: var(--text-headings); font-size: 0.88rem;">${mb.method}</div>
+                  <div style="font-weight: 700; color: var(--text-headings); font-size: 0.88rem;">${escapeHTML(mb.method)}</div>
                   <div style="font-size: 0.72rem; color: var(--text-dim);">
                     Entradas: <span style="color: #34d399;">+$${mb.totalIn.toLocaleString('es-CO')}</span> | Salidas: <span style="color: #f87171;">-$${mb.totalOut.toLocaleString('es-CO')}</span>
                   </div>
@@ -3439,12 +3454,12 @@ const App = {
           return `
             <tr>
               <td>
-                <strong>${s.supplierName}</strong>
+                <strong>${escapeHTML(s.supplierName)}</strong>
                 <div style="font-size: 0.72rem; color: var(--text-dim);">${s.transactions.length} pago(s) registrado(s)</div>
               </td>
               <td>
-                <span class="ticker-badge ${s.category.includes('Italiano') ? 'badge-italian' : (s.category.includes('24K') ? 'badge-bullion' : 'badge-nacional')}">
-                  ${s.category}
+                <span class="ticker-badge ${escapeHTML(s.category.includes('Italiano') ? 'badge-italian' : (s.category.includes('24K') ? 'badge-bullion' : 'badge-nacional'))}">
+                  ${escapeHTML(s.category)}
                 </span>
               </td>
               <td class="text-right mono" style="font-weight: 800; color: #f87171;">
@@ -3498,10 +3513,10 @@ const App = {
       const isCredito = item.type === 'credito_otorgado';
 
       const typeBadge = isIngreso 
-        ? `<span class="stat-badge pos" style="font-weight: 800;">🟢 INGRESO</span>`
+        ? `<span class="stat-badge pos" style="font-weight: 800;"> INGRESO</span>`
         : (isEgreso 
-          ? `<span class="stat-badge neg" style="font-weight: 800;">🔴 EGRESO</span>` 
-          : `<span class="ticker-badge badge-nacional" style="font-weight: 800;">⏳ CRÉDITO</span>`);
+          ? `<span class="stat-badge neg" style="font-weight: 800;"> EGRESO</span>`
+          : `<span class="ticker-badge badge-nacional" style="font-weight: 800;"> CRÉDITO</span>`);
 
       const formattedDate = new Date(item.date).toLocaleString('es-CO', {
         dateStyle: 'short',
@@ -3530,7 +3545,7 @@ const App = {
             ${isIngreso ? `+$${item.amount.toLocaleString('es-CO')}` : '-'}
           </td>
           <td class="text-right mono" style="font-weight: 800; color: #f87171;">
-            ${isEgreso ? `-$${item.amount.toLocaleString('es-CO')}` : (isCredito ? `<span style="color: #fbbf24;">[$${item.amount.toLocaleString('es-CO')}]</span>` : '-')}
+            ${isEgreso ? `-$${item.amount.toLocaleString('es-CO')}` : (isCredito ? `<span style="color: #b79b68;">[$${item.amount.toLocaleString('es-CO')}]</span>` : '-')}
           </td>
           <td class="text-right mono" style="font-weight: 800; color: ${item.runningBalance >= 0 ? 'var(--gold-light)' : '#f87171'};">
             $${item.runningBalance.toLocaleString('es-CO')}
@@ -3548,7 +3563,7 @@ const App = {
     document.getElementById('mov-ref').value = '';
     document.getElementById('mov-notes').value = '';
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = AureaSafe.dateKey();
     document.getElementById('mov-date').value = today;
 
     // Populate method select
@@ -3616,7 +3631,7 @@ const App = {
     };
 
     try {
-      const res = await fetch('/api/cash-movements', {
+      const res = await this.apiFetch('/api/cash-movements', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -3649,34 +3664,33 @@ const App = {
         <!-- Header -->
         <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #000; padding-bottom: 14px; margin-bottom: 20px;">
           <div>
-            <h1 style="font-size: 1.6rem; font-weight: 900; margin: 0; color: #000; letter-spacing: 1px;">NEXUS POR MAYOR</h1>
-            <p style="margin: 2px 0 0 0; font-size: 0.85rem; color: #475569;">Bóveda Central de Joyería en Oro 18K & Metales Preciosos</p>
-            <p style="margin: 2px 0 0 0; font-size: 0.8rem; color: #64748b;">NIT: 901.884.221-9 | Medellín, Colombia</p>
+            <h1 style="font-size: 1.6rem; font-weight: 900; margin: 0; color: #000; letter-spacing: 1px;"><img src="/assets/aurea-symbol.svg" alt="" style="width:32px;height:32px;vertical-align:middle;margin-right:10px;">áurea <span style="font:500 10px Inter,Arial,sans-serif;letter-spacing:2px;">MAYORISTAS</span></h1>
+            <p style="margin: 2px 0 0 0; font-size: 0.85rem; color: #53685e;">Bóveda Central de Joyería en Oro 18K & Metales Preciosos</p>
           </div>
           <div style="text-align: right;">
             <div style="font-size: 1.15rem; font-weight: 800; text-transform: uppercase;">ACTA DE CUADRE DE CAJA</div>
-            <div style="font-size: 0.82rem; font-family: monospace; color: #475569;">Corte: ${now.toLocaleDateString('es-CO')} ${now.toLocaleTimeString('es-CO')}</div>
-            <div style="font-size: 0.8rem; font-weight: 700; color: #b45309;">Periodo: ${this.cuadrePeriod.toUpperCase()}</div>
+            <div style="font-size: 0.82rem; font-family: monospace; color: #53685e;">Corte: ${now.toLocaleDateString('es-CO')} ${now.toLocaleTimeString('es-CO')}</div>
+            <div style="font-size: 0.8rem; font-weight: 700; color: #826a3e;">Periodo: ${this.cuadrePeriod.toUpperCase()}</div>
           </div>
         </div>
 
         <!-- KPI Resumen Ejecutivo -->
         <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px; text-align: center;">
-          <div style="border: 1px solid #cbd5e1; border-radius: 6px; padding: 10px;">
-            <div style="font-size: 0.7rem; color: #64748b; font-weight: 700;">TOTAL INGRESOS</div>
+          <div style="border: 1px solid #cbd2c9; border-radius: 6px; padding: 10px;">
+            <div style="font-size: 0.7rem; color: #627469; font-weight: 700;">TOTAL INGRESOS</div>
             <div style="font-size: 1.1rem; font-weight: 900; color: #15803d; font-family: monospace;">+$${summary.totalInflows.toLocaleString('es-CO')}</div>
           </div>
-          <div style="border: 1px solid #cbd5e1; border-radius: 6px; padding: 10px;">
-            <div style="font-size: 0.7rem; color: #64748b; font-weight: 700;">TOTAL EGRESOS</div>
+          <div style="border: 1px solid #cbd2c9; border-radius: 6px; padding: 10px;">
+            <div style="font-size: 0.7rem; color: #627469; font-weight: 700;">TOTAL EGRESOS</div>
             <div style="font-size: 1.1rem; font-weight: 900; color: #b91c1c; font-family: monospace;">-$${summary.totalOutflows.toLocaleString('es-CO')}</div>
           </div>
-          <div style="border: 2px solid #000; border-radius: 6px; padding: 10px; background: #f8fafc;">
+          <div style="border: 2px solid #000; border-radius: 6px; padding: 10px; background: #fafbf7;">
             <div style="font-size: 0.7rem; color: #000; font-weight: 800;">SALDO NETO CAJA</div>
             <div style="font-size: 1.15rem; font-weight: 900; color: #000; font-family: monospace;">$${summary.netCashFlow.toLocaleString('es-CO')}</div>
           </div>
-          <div style="border: 1px solid #cbd5e1; border-radius: 6px; padding: 10px;">
-            <div style="font-size: 0.7rem; color: #64748b; font-weight: 700;">CRÉDITOS OTORGADOS</div>
-            <div style="font-size: 1.1rem; font-weight: 900; color: #d97706; font-family: monospace;">$${summary.totalCreditsIssued.toLocaleString('es-CO')}</div>
+          <div style="border: 1px solid #cbd2c9; border-radius: 6px; padding: 10px;">
+            <div style="font-size: 0.7rem; color: #627469; font-weight: 700;">CRÉDITOS OTORGADOS</div>
+            <div style="font-size: 1.1rem; font-weight: 900; color: #826a3e; font-family: monospace;">$${summary.totalCreditsIssued.toLocaleString('es-CO')}</div>
           </div>
         </div>
 
@@ -3684,11 +3698,11 @@ const App = {
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
           <!-- Medios de Pago -->
           <div>
-            <h4 style="font-size: 0.85rem; font-weight: 800; border-bottom: 1px solid #cbd5e1; padding-bottom: 4px; margin: 0 0 8px 0;">ARQUEO POR MEDIO DE PAGO</h4>
+            <h4 style="font-size: 0.85rem; font-weight: 800; border-bottom: 1px solid #cbd2c9; padding-bottom: 4px; margin: 0 0 8px 0;">ARQUEO POR MEDIO DE PAGO</h4>
             <table style="width: 100%; font-size: 0.78rem; border-collapse: collapse;">
               ${(summary.methodBalances || []).map(mb => `
-                <tr style="border-bottom: 1px solid #f1f5f9;">
-                  <td style="padding: 4px 0;"><strong>${mb.method}</strong></td>
+                <tr style="border-bottom: 1px solid #f0f3ed;">
+                  <td style="padding: 4px 0;"><strong>${escapeHTML(mb.method)}</strong></td>
                   <td style="padding: 4px 0; text-align: right; font-family: monospace; font-weight: 700;">$${mb.balance.toLocaleString('es-CO')}</td>
                 </tr>
               `).join('')}
@@ -3697,11 +3711,11 @@ const App = {
 
           <!-- Pagos a Proveedores -->
           <div>
-            <h4 style="font-size: 0.85rem; font-weight: 800; border-bottom: 1px solid #cbd5e1; padding-bottom: 4px; margin: 0 0 8px 0;">PAGOS A PROVEEDORES & TALLERES</h4>
+            <h4 style="font-size: 0.85rem; font-weight: 800; border-bottom: 1px solid #cbd2c9; padding-bottom: 4px; margin: 0 0 8px 0;">PAGOS A PROVEEDORES & TALLERES</h4>
             <table style="width: 100%; font-size: 0.78rem; border-collapse: collapse;">
               ${(summary.supplierDisbursements || []).map(s => `
-                <tr style="border-bottom: 1px solid #f1f5f9;">
-                  <td style="padding: 4px 0;"><strong>${s.supplierName}</strong></td>
+                <tr style="border-bottom: 1px solid #f0f3ed;">
+                  <td style="padding: 4px 0;"><strong>${escapeHTML(s.supplierName)}</strong></td>
                   <td style="padding: 4px 0; text-align: right; font-family: monospace; font-weight: 700; color: #b91c1c;">-$${s.totalPaid.toLocaleString('es-CO')}</td>
                 </tr>
               `).join('')}
@@ -3710,10 +3724,10 @@ const App = {
         </div>
 
         <!-- Renglones de Movimientos -->
-        <h4 style="font-size: 0.85rem; font-weight: 800; border-bottom: 1px solid #cbd5e1; padding-bottom: 4px; margin: 0 0 8px 0;">DETALLE TRANSACCIONAL (LIBRO DIARIO)</h4>
+        <h4 style="font-size: 0.85rem; font-weight: 800; border-bottom: 1px solid #cbd2c9; padding-bottom: 4px; margin: 0 0 8px 0;">DETALLE TRANSACCIONAL (LIBRO DIARIO)</h4>
         <table style="width: 100%; font-size: 0.75rem; border-collapse: collapse; margin-bottom: 30px;">
           <thead>
-            <tr style="background: #f1f5f9; text-align: left;">
+            <tr style="background: #f0f3ed; text-align: left;">
               <th style="padding: 6px;">Hora</th>
               <th style="padding: 6px;">Concepto</th>
               <th style="padding: 6px;">Tercero</th>
@@ -3724,11 +3738,11 @@ const App = {
           </thead>
           <tbody>
             ${items.slice(0, 15).map(i => `
-              <tr style="border-bottom: 1px solid #e2e8f0;">
+              <tr style="border-bottom: 1px solid #dddfd7;">
                 <td style="padding: 5px; font-family: monospace;">${new Date(i.date).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}</td>
-                <td style="padding: 5px;">${i.category} - <span style="color: #64748b;">${i.reference}</span></td>
-                <td style="padding: 5px;"><strong>${i.entityName}</strong></td>
-                <td style="padding: 5px;">${i.method.slice(0, 18)}...</td>
+                <td style="padding: 5px;">${escapeHTML(i.category)} - <span style="color: #627469;">${escapeHTML(i.reference)}</span></td>
+                <td style="padding: 5px;"><strong>${escapeHTML(i.entityName)}</strong></td>
+                <td style="padding: 5px;">${escapeHTML(i.method.slice(0, 18))}...</td>
                 <td style="padding: 5px; text-align: right; font-family: monospace; font-weight: 700; color: #15803d;">${i.type === 'ingreso' ? `+$${i.amount.toLocaleString('es-CO')}` : '-'}</td>
                 <td style="padding: 5px; text-align: right; font-family: monospace; font-weight: 700; color: #b91c1c;">${i.type === 'egreso' ? `-$${i.amount.toLocaleString('es-CO')}` : '-'}</td>
               </tr>
@@ -3740,11 +3754,11 @@ const App = {
         <div style="display: flex; justify-content: space-between; margin-top: 50px; padding-top: 20px;">
           <div style="text-align: center; width: 220px; border-top: 1px solid #000; padding-top: 6px; font-size: 0.8rem;">
             <strong>Entregado Conforme</strong><br>
-            <span style="font-size: 0.72rem; color: #64748b;">Cajero / Tesorería Mayorista</span>
+            <span style="font-size: 0.72rem; color: #627469;">Cajero / Tesorería Mayorista</span>
           </div>
           <div style="text-align: center; width: 220px; border-top: 1px solid #000; padding-top: 6px; font-size: 0.8rem;">
             <strong>Revisado & Aprobado</strong><br>
-            <span style="font-size: 0.72rem; color: #64748b;">Auditoría Interna / Gerencia</span>
+            <span style="font-size: 0.72rem; color: #627469;">Auditoría Interna / Gerencia</span>
           </div>
         </div>
       </div>
@@ -3760,13 +3774,13 @@ const App = {
     const grams = scale.currentGrams;
     const total = Math.round(grams * saleRate);
 
-    const text = `💎 *NEXUS POR MAYOR - COTIZACIÓN DE JOYERÍA* 💎\n` +
-      `📅 Fecha: ${new Date().toLocaleDateString('es-CO')}\n\n` +
-      `✨ *Línea:* ${label}\n` +
-      `⚖️ *Gramaje pesado:* ${grams.toFixed(2)} gramos netos\n` +
-      `🏷️ *Precio por gramo acordado:* $${saleRate.toLocaleString('es-CO')} COP/g\n` +
-      `💰 *Total Liquidación:* $${total.toLocaleString('es-CO')} COP\n\n` +
-      `📍 Despachos inmediatos a todo el país. Precios válidos por el día de hoy.`;
+    const text = ` *ÁUREA MAYORISTAS - COTIZACIÓN DE JOYERÍA* \n` +
+      ` Fecha: ${new Date().toLocaleDateString('es-CO', {timeZone:'America/Bogota'})}\n\n` +
+      ` *Línea:* ${label}\n` +
+      ` *Gramaje pesado:* ${grams.toFixed(2)} gramos netos\n` +
+      ` *Precio por gramo acordado:* $${saleRate.toLocaleString('es-CO')} COP/g\n` +
+      ` *Total Liquidación:* $${total.toLocaleString('es-CO')} COP\n\n` +
+      ` Despachos inmediatos a todo el país. Precios válidos por el día de hoy.`;
 
     navigator.clipboard.writeText(text).then(() => {
       alert('¡Cotización copiada al portapapeles! Lista para pegar en WhatsApp.');
@@ -3774,36 +3788,7 @@ const App = {
   },
 
   // Aliases and Operational UI Helpers
-  submitNewClient() {
-    return this.submitJoyeriaForm();
-  },
 
-  addSelectedItemToDispatch() {
-    const itemSelect = document.getElementById('despacho-item-select');
-    const itemId = itemSelect ? itemSelect.value : '';
-    const weightVal = parseFloat(document.getElementById('despacho-weight-input')?.value);
-    const salePriceVal = parseFloat(document.getElementById('despacho-sale-price-input')?.value);
-
-    if (!itemId) {
-      alert('Por favor selecciona una prenda de la lista.');
-      return;
-    }
-    if (!weightVal || weightVal <= 0) {
-      alert('Por favor ingresa un peso válido en gramos.');
-      return;
-    }
-    if (!salePriceVal || salePriceVal <= 0) {
-      alert('Por favor pacta el precio de venta por gramo.');
-      return;
-    }
-
-    const item = this.items.find(i => i.id === itemId);
-    if (item) {
-      this.addItemToDispatch(item, weightVal, salePriceVal);
-      const wInput = document.getElementById('despacho-weight-input');
-      if (wInput) wInput.value = '';
-    }
-  },
 
   async editItemPrompt(itemId) {
     const item = this.items.find(i => i.id === itemId);
@@ -3819,7 +3804,7 @@ const App = {
     }
 
     try {
-      const res = await fetch(`/api/items/${itemId}`, {
+      const res = await this.apiFetch(`/api/items/${itemId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ weightGrams: newWeight })
@@ -3841,13 +3826,7 @@ const App = {
     }
   },
 
-  openNewPurchaseModal() {
-    this.openCompraPuroModal();
-  },
 
-  openNewDeliveryModal(supplierId = null) {
-    this.openEntregaPuroModal(supplierId);
-  },
 
   viewRemision(orderId) {
     const order = typeof orderId === 'object' ? orderId : this.orders.find(o => o.id === orderId);
@@ -3905,7 +3884,7 @@ const App = {
     }
 
     try {
-      const res = await fetch('/api/rates', {
+      const res = await this.apiFetch('/api/rates', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -3940,7 +3919,7 @@ const App = {
     }
 
     try {
-      const res = await fetch('/api/rates', {
+      const res = await this.apiFetch('/api/rates', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ resetOverrides: true })
@@ -3966,13 +3945,13 @@ const App = {
   // GESTIÓN DE CATEGORÍAS DE BÓVEDA (Añadir, Editar, Eliminar)
   // =========================================================
   categoryColorPresets: [
-    { label: 'Oro 18K Clásico', color: '#d4af37' },
-    { label: 'Oro Nacional Ámbar', color: '#fbbf24' },
+    { label: 'Oro 18K Clásico', color: '#b79b68' },
+    { label: 'Oro Nacional Ámbar', color: '#b79b68' },
     { label: 'Oro Italiano Esmeralda', color: '#34d399' },
     { label: 'Oro Rosa / Turco', color: '#f43f5e' },
     { label: 'Zafiro / Importado', color: '#38bdf8' },
     { label: 'Amatista / Alta Joyería', color: '#c084fc' },
-    { label: 'Platino / Oro Blanco', color: '#e2e8f0' }
+    { label: 'Platino / Oro Blanco', color: '#dddfd7' }
   ],
 
   openManageCategoriesModal() {
@@ -3997,8 +3976,8 @@ const App = {
   },
 
   onCategoryInputPreview() {
-    const badgeText = document.getElementById('cat-badge-input')?.value.trim() || document.getElementById('cat-name-input')?.value.trim() || '🏷️ Nueva Categoría';
-    const color = document.getElementById('cat-color-picker')?.value || '#d4af37';
+    const badgeText = document.getElementById('cat-badge-input')?.value.trim() || document.getElementById('cat-name-input')?.value.trim() || ' Nueva Categoría';
+    const color = document.getElementById('cat-color-picker')?.value || '#b79b68';
     const preview = document.getElementById('cat-preview-badge');
     if (preview) {
       preview.innerText = badgeText;
@@ -4029,7 +4008,7 @@ const App = {
     container.innerHTML = this.categories.map(cat => {
       const catItems = (this.items || []).filter(i => i.category === cat.slug);
       const totalGrams = catItems.reduce((acc, it) => acc + (Number(it.weightGrams) || 0), 0);
-      const color = cat.color || '#d4af37';
+      const color = cat.color || '#b79b68';
 
       return `
         <div class="cat-item-row">
@@ -4037,26 +4016,24 @@ const App = {
             <div class="cat-color-dot" style="background: ${color}; box-shadow: 0 0 10px ${color}88;"></div>
             <div style="min-width: 0;">
               <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                <span style="font-weight: 800; color: var(--text-headings); font-size: 0.95rem;">${cat.name}</span>
+                <span style="font-weight: 800; color: var(--text-headings); font-size: 0.95rem;">${escapeHTML(cat.name)}</span>
                 <span class="ticker-badge" style="color: ${color}; border: 1px solid ${color}66; background: ${color}22; font-size: 0.72rem; padding: 2px 7px; border-radius: 9999px;">
-                  ${cat.badgeText || cat.name}
+                  ${escapeHTML(cat.badgeText || cat.name)}
                 </span>
                 <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; color: var(--text-dim);">slug: ${cat.slug}</span>
               </div>
               <div style="font-size: 0.76rem; color: var(--text-muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                ${cat.description ? `${cat.description} • ` : ''}
-                <span style="color: var(--gold-light); font-weight: 700;">📦 ${catItems.length} lotes (${totalGrams.toFixed(1)}g en bóveda)</span>
+                ${cat.description ? `${escapeHTML(cat.description)} • ` : ''}
+                <span style="color: var(--gold-light); font-weight: 700;"> ${catItems.length} lotes (${totalGrams.toFixed(1)}g en bóveda)</span>
               </div>
             </div>
           </div>
 
           <div style="display: flex; gap: 8px; flex-shrink: 0;">
             <button class="btn btn-secondary btn-sm" onclick="App.editCategory('${cat.id}')" title="Editar Categoría" style="padding: 6px 10px; font-size: 0.78rem;">
-              ✏️ Editar
+               Editar
             </button>
-            <button class="btn btn-secondary btn-sm" onclick="App.deleteCategory('${cat.id}')" title="Eliminar Categoría" style="padding: 6px 10px; font-size: 0.78rem; color: #f87171; border-color: rgba(239, 68, 68, 0.3);">
-              🗑️
-            </button>
+            <button class="btn btn-secondary btn-sm" onclick="App.deleteCategory('${cat.id}')" title="Eliminar Categoría" style="padding: 6px 10px; font-size: 0.78rem; color: #f87171; border-color: rgba(239, 68, 68, 0.3);">Eliminar</button>
           </div>
         </div>
       `;
@@ -4070,18 +4047,18 @@ const App = {
     document.getElementById('cat-edit-id').value = cat.id;
     document.getElementById('cat-name-input').value = cat.name;
     document.getElementById('cat-badge-input').value = cat.badgeText || cat.name;
-    document.getElementById('cat-color-picker').value = cat.color || '#d4af37';
+    document.getElementById('cat-color-picker').value = cat.color || '#b79b68';
     document.getElementById('cat-slug-input').value = cat.slug;
     document.getElementById('cat-desc-input').value = cat.description || '';
 
     const title = document.getElementById('cat-form-title');
-    if (title) title.innerText = `✏️ Editando Categoría: "${cat.name}"`;
+    if (title) title.innerText = ` Editando Categoría: "${cat.name}"`;
 
     const cancelBtn = document.getElementById('btn-cancel-edit-cat');
     if (cancelBtn) cancelBtn.style.display = 'inline-block';
 
     const submitBtn = document.getElementById('btn-submit-cat');
-    if (submitBtn) submitBtn.innerText = '💾 Actualizar Categoría';
+    if (submitBtn) submitBtn.innerText = ' Actualizar Categoría';
 
     this.onCategoryInputPreview();
 
@@ -4093,18 +4070,18 @@ const App = {
     document.getElementById('cat-edit-id').value = '';
     document.getElementById('cat-name-input').value = '';
     document.getElementById('cat-badge-input').value = '';
-    document.getElementById('cat-color-picker').value = '#d4af37';
+    document.getElementById('cat-color-picker').value = '#b79b68';
     document.getElementById('cat-slug-input').value = '';
     document.getElementById('cat-desc-input').value = '';
 
     const title = document.getElementById('cat-form-title');
-    if (title) title.innerText = '➕ Añadir Nueva Categoría';
+    if (title) title.innerText = ' Añadir Nueva Categoría';
 
     const cancelBtn = document.getElementById('btn-cancel-edit-cat');
     if (cancelBtn) cancelBtn.style.display = 'none';
 
     const submitBtn = document.getElementById('btn-submit-cat');
-    if (submitBtn) submitBtn.innerText = '💾 Guardar Categoría';
+    if (submitBtn) submitBtn.innerText = ' Guardar Categoría';
 
     this.onCategoryInputPreview();
   },
@@ -4113,7 +4090,7 @@ const App = {
     const editId = document.getElementById('cat-edit-id')?.value;
     const name = document.getElementById('cat-name-input')?.value.trim();
     const badgeText = document.getElementById('cat-badge-input')?.value.trim();
-    const color = document.getElementById('cat-color-picker')?.value || '#d4af37';
+    const color = document.getElementById('cat-color-picker')?.value || '#b79b68';
     const slug = document.getElementById('cat-slug-input')?.value.trim();
     const description = document.getElementById('cat-desc-input')?.value.trim();
 
@@ -4133,13 +4110,13 @@ const App = {
     try {
       let res;
       if (editId) {
-        res = await fetch(`/api/categories/${editId}`, {
+        res = await this.apiFetch(`/api/categories/${editId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         }).then(r => r.json());
       } else {
-        res = await fetch('/api/categories', {
+        res = await this.apiFetch('/api/categories', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
@@ -4176,13 +4153,13 @@ const App = {
     const catItems = (this.items || []).filter(i => i.category === cat.slug);
     let confirmMsg = `¿Deseas eliminar la categoría "${cat.name}"?`;
     if (catItems.length > 0) {
-      confirmMsg += `\n\n⚠️ ATENCIÓN: Hay ${catItems.length} lotes de oro asignados a esta categoría. Al eliminarla, estos lotes serán reasignados automáticamente a otra categoría para no perder inventario.`;
+      confirmMsg += `\n\n ATENCIÓN: Hay ${catItems.length} lotes de oro asignados a esta categoría. Al eliminarla, estos lotes serán reasignados automáticamente a otra categoría para no perder inventario.`;
     }
 
     if (!confirm(confirmMsg)) return;
 
     try {
-      const res = await fetch(`/api/categories/${id}`, {
+      const res = await this.apiFetch(`/api/categories/${id}`, {
         method: 'DELETE'
       }).then(r => r.json());
 
@@ -4212,19 +4189,11 @@ const App = {
   // ============================================================
   balanceGeneralData: null,
 
-  escapeHtml(str) {
-    if (!str) return '';
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-  },
+  escapeHtml(str) { return AureaSafe.escapeHtml(str); },
 
   async loadBalanceGeneral() {
     try {
-      const res = await fetch('/api/balance-general');
+      const res = await this.apiFetch('/api/balance-general');
       const data = await res.json();
       if (data && data.success) {
         this.balanceGeneralData = data;
@@ -4253,7 +4222,7 @@ const App = {
     }
     const backingEl = document.getElementById('bg-gold-backing-pill');
     if (backingEl) {
-      backingEl.innerText = `👑 Respaldo Físico: ${(activos.totalGramsEq24k || 0).toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} g 24K eq.`;
+      backingEl.innerText = ` Respaldo Físico: ${(activos.totalGramsEq24k || 0).toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} g 24K eq.`;
     }
 
     // 2. Executive KPI Cards
@@ -4356,7 +4325,7 @@ const App = {
       } else {
         listDisp.innerHTML = cuentas.map(acc => {
           const isCash = acc.type === 'caja';
-          const icon = isCash ? '💵' : (acc.type === 'banco' ? '🏦' : '🪙');
+          const icon = isCash ? '' : (acc.type === 'banco' ? '' : '');
           const desc = isCash ? 'Caja Fuerte / Efectivo Físico' : 'Cuenta de Tesorería & Transferencias';
           const isPos = acc.balance >= 0;
           return `
@@ -4431,7 +4400,7 @@ const App = {
       const othHtml = (oth.grams > 0) ? `
         <div class="balance-line-item">
           <div style="display: flex; align-items: center; gap: 10px;">
-            <span style="font-size: 1.15rem;">✨</span>
+            <span style="font-size: 1.15rem;"></span>
             <div>
               <div style="font-weight: 700; color: var(--text-headings); font-size: 0.88rem;">Otras Categorías & Joyería Especial (Bóveda)</div>
               <div style="font-size: 0.72rem; color: var(--text-dim);">
@@ -4448,7 +4417,7 @@ const App = {
       listReal.innerHTML = `
         <div class="balance-line-item">
           <div style="display: flex; align-items: center; gap: 10px;">
-            <span style="font-size: 1.15rem;">🇮🇹</span>
+            <span style="font-size: 1.15rem;"></span>
             <div>
               <div style="font-weight: 700; color: var(--text-headings); font-size: 0.88rem;">Oro Italiano 18K (Ley 750) en Bóveda</div>
               <div style="font-size: 0.72rem; color: var(--text-dim);">
@@ -4463,7 +4432,7 @@ const App = {
 
         <div class="balance-line-item">
           <div style="display: flex; align-items: center; gap: 10px;">
-            <span style="font-size: 1.15rem;">🇨🇴</span>
+            <span style="font-size: 1.15rem;"></span>
             <div>
               <div style="font-weight: 700; color: var(--text-headings); font-size: 0.88rem;">Oro Nacional 18K en Bóveda</div>
               <div style="font-size: 0.72rem; color: var(--text-dim);">
@@ -4471,7 +4440,7 @@ const App = {
               </div>
             </div>
           </div>
-          <span class="mono line-val" style="color: #f59e0b; font-weight: 800;">
+          <span class="mono line-val" style="color: #a18350; font-weight: 800;">
             $${(nc.totalValue || 0).toLocaleString('es-CO')}
           </span>
         </div>
@@ -4480,7 +4449,7 @@ const App = {
 
         <div class="balance-line-item">
           <div style="display: flex; align-items: center; gap: 10px;">
-            <span style="font-size: 1.15rem;">👑</span>
+            <span style="font-size: 1.15rem;"></span>
             <div>
               <div style="font-weight: 700; color: var(--text-headings); font-size: 0.88rem;">Granalla & Lingotes Oro Puro 24K (Bóveda)</div>
               <div style="font-size: 0.72rem; color: var(--text-dim);">
@@ -4495,7 +4464,7 @@ const App = {
 
         <div class="balance-line-item">
           <div style="display: flex; align-items: center; gap: 10px;">
-            <span style="font-size: 1.15rem;">🔨</span>
+            <span style="font-size: 1.15rem;"></span>
             <div>
               <div style="font-weight: 700; color: var(--text-headings); font-size: 0.88rem;">Oro Puro 24K en Talleres de Maquila</div>
               <div style="font-size: 0.72rem; color: var(--text-dim);">
@@ -4510,7 +4479,7 @@ const App = {
 
         <div class="balance-line-item">
           <div style="display: flex; align-items: center; gap: 10px;">
-            <span style="font-size: 1.15rem;">♻️</span>
+            <span style="font-size: 1.15rem;"></span>
             <div>
               <div style="font-weight: 700; color: var(--text-headings); font-size: 0.88rem;">Retal de Oro 18K en Bóveda (Abonos)</div>
               <div style="font-size: 0.72rem; color: var(--text-dim);">
@@ -4549,7 +4518,7 @@ const App = {
           <div class="balance-line-item">
             <div>
               <div style="font-weight: 700; color: var(--text-headings); font-size: 0.88rem;">${this.escapeHtml(c.name)}</div>
-              <div style="font-size: 0.72rem; color: var(--text-dim);">${c.category === 'oro_puro' ? 'Oro Puro 24K' : 'Importador Italiano'}</div>
+              <div style="font-size: 0.72rem; color: var(--text-dim);">${escapeHTML(c.category === 'oro_puro' ? 'Oro Puro 24K' : 'Importador Italiano')}</div>
             </div>
             <span class="mono line-val" style="color: var(--danger-accent); font-weight: 800;">
               $${c.balanceDuePesos.toLocaleString('es-CO')}
@@ -4637,28 +4606,27 @@ const App = {
     if (!container) return;
 
     container.innerHTML = `
-      <div class="print-statement-header" style="border-bottom: 2px solid #d4af37; padding-bottom: 16px; margin-bottom: 20px;">
+      <div class="print-statement-header" style="border-bottom: 2px solid #b79b68; padding-bottom: 16px; margin-bottom: 20px;">
         <div style="display: flex; justify-content: space-between; align-items: flex-start;">
           <div>
-            <h2 style="font-size: 1.4rem; color: #1e293b; margin: 0; font-weight: 800; letter-spacing: -0.02em;">NEXUS JOYAS MAYORISTAS S.A.S</h2>
-            <div style="font-size: 0.85rem; color: #64748b; margin-top: 2px;">NIT: 901.884.221-9 | Régimen Ordinario Comercial</div>
-            <div style="font-size: 0.85rem; color: #64748b;">Bóveda Central de Valores & Mayorista de Joyería en Oro 18K (750)</div>
+            <h2 style="font-size: 1.4rem; color: #243b33; margin: 0; font-weight: 800; letter-spacing: -0.02em;"><img src="/assets/aurea-symbol.svg" alt="" style="width:32px;height:32px;vertical-align:middle;margin-right:10px;">áurea <span style="font:500 10px Inter,Arial,sans-serif;letter-spacing:2px;">MAYORISTAS</span></h2>
+            <div style="font-size: 0.85rem; color: #627469;">Bóveda Central de Valores & Mayorista de Joyería en Oro 18K (750)</div>
           </div>
           <div style="text-align: right;">
-            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 12px; display: inline-block;">
-              <span style="font-size: 0.72rem; color: #64748b; text-transform: uppercase; font-weight: 700; display: block;">CORTE CONTABLE</span>
-              <strong style="font-size: 0.85rem; color: #0f172a;">${formattedDate}</strong>
+            <div style="background: #fafbf7; border: 1px solid #dddfd7; border-radius: 6px; padding: 6px 12px; display: inline-block;">
+              <span style="font-size: 0.72rem; color: #627469; text-transform: uppercase; font-weight: 700; display: block;">CORTE CONTABLE</span>
+              <strong style="font-size: 0.85rem; color: #163e35;">${formattedDate}</strong>
             </div>
-            <div style="font-size: 0.75rem; color: #059669; font-weight: 700; margin-top: 6px;">✓ Certificado Balance Cuadrado</div>
+            <div style="font-size: 0.75rem; color: #059669; font-weight: 700; margin-top: 6px;">✓ Balance de la operación</div>
           </div>
         </div>
       </div>
 
       <div style="text-align: center; margin-bottom: 22px;">
-        <h3 style="font-size: 1.15rem; color: #0f172a; margin: 0; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 800;">
+        <h3 style="font-size: 1.15rem; color: #163e35; margin: 0; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 800;">
           ESTADO DE SITUACIÓN FINANCIERA & BALANCE GENERAL PATRIMONIAL
         </h3>
-        <p style="font-size: 0.78rem; color: #64748b; margin: 4px 0 0 0;">Expresado en Pesos Colombianos (COP) y Equivalencia Fina en Oro Puro 24K (Ley 999.9)</p>
+        <p style="font-size: 0.78rem; color: #627469; margin: 4px 0 0 0;">Expresado en Pesos Colombianos (COP) y Equivalencia Fina en Oro Puro 24K (Ley 999.9)</p>
       </div>
 
       <!-- Resumen Ejecutivo de Doble Partida -->
@@ -4668,7 +4636,7 @@ const App = {
           <div style="font-size: 1.5rem; font-weight: 900; color: #15803d; margin: 4px 0;" class="mono">$${(activos.total || 0).toLocaleString('es-CO')}</div>
           <div style="font-size: 0.75rem; color: #166534;">Equivalente a ${(activos.totalGramsEq24k || 0).toFixed(2)} g Oro 24K</div>
         </div>
-        <div style="background: #fefce8; border: 1px solid #fef08a; border-radius: 8px; padding: 14px;">
+        <div style="background: #fefce8; border: 1px solid #d3bd95; border-radius: 8px; padding: 14px;">
           <div style="font-size: 0.75rem; font-weight: 700; color: #854d0e; text-transform: uppercase;">TOTAL PASIVOS + PATRIMONIO NETO</div>
           <div style="font-size: 1.5rem; font-weight: 900; color: #a16207; margin: 4px 0;" class="mono">$${((pasivos.total || 0) + (patrimonio.netWorth || 0)).toLocaleString('es-CO')}</div>
           <div style="font-size: 0.75rem; color: #854d0e;">Equilibrio Patrimonial NIIF Verificado</div>
@@ -4685,48 +4653,48 @@ const App = {
           </h4>
           <table style="width: 100%; font-size: 0.8rem; border-collapse: collapse;">
             <tbody>
-              <tr style="background: #f8fafc; font-weight: 700;">
+              <tr style="background: #fafbf7; font-weight: 700;">
                 <td style="padding: 6px 4px;">1.1 Activos Disponibles (Caja & Bancos)</td>
                 <td style="padding: 6px 4px; text-align: right;" class="mono">$${((activos.disponible && activos.disponible.total) || 0).toLocaleString('es-CO')}</td>
               </tr>
               ${((activos.disponible && activos.disponible.cuentas) || []).map(a => `
-                <tr style="border-bottom: 1px solid #f1f5f9;">
-                  <td style="padding: 4px 12px; color: #475569;">• ${this.escapeHtml(a.name)}</td>
+                <tr style="border-bottom: 1px solid #f0f3ed;">
+                  <td style="padding: 4px 12px; color: #53685e;">• ${this.escapeHtml(a.name)}</td>
                   <td style="padding: 4px 4px; text-align: right; color: #334155;" class="mono">$${(a.balance || 0).toLocaleString('es-CO')}</td>
                 </tr>
               `).join('')}
 
-              <tr style="background: #f8fafc; font-weight: 700;">
+              <tr style="background: #fafbf7; font-weight: 700;">
                 <td style="padding: 6px 4px;">1.2 Activos Exigibles (Cartera CxC)</td>
                 <td style="padding: 6px 4px; text-align: right;" class="mono">$${((activos.exigible && activos.exigible.totalPesos) || 0).toLocaleString('es-CO')}</td>
               </tr>
-              <tr style="border-bottom: 1px solid #f1f5f9;">
-                <td style="padding: 4px 12px; color: #475569;">• Respaldo en Metal Cartera (${((activos.exigible && activos.exigible.activeDebtorsCount) || 0)} clientes)</td>
+              <tr style="border-bottom: 1px solid #f0f3ed;">
+                <td style="padding: 4px 12px; color: #53685e;">• Respaldo en Metal Cartera (${((activos.exigible && activos.exigible.activeDebtorsCount) || 0)} clientes)</td>
                 <td style="padding: 4px 4px; text-align: right; color: #334155;" class="mono">${((activos.exigible && activos.exigible.totalGrams18k) || 0).toFixed(2)} g 18K</td>
               </tr>
 
-              <tr style="background: #f8fafc; font-weight: 700;">
+              <tr style="background: #fafbf7; font-weight: 700;">
                 <td style="padding: 6px 4px;">1.3 Activos Realizables (Inventario Metales)</td>
                 <td style="padding: 6px 4px; text-align: right;" class="mono">$${((activos.realizable && activos.realizable.totalInventoryValue) || 0).toLocaleString('es-CO')}</td>
               </tr>
-              <tr style="border-bottom: 1px solid #f1f5f9;">
-                <td style="padding: 4px 12px; color: #475569;">• Oro Italiano 18K (${((activos.realizable && activos.realizable.joyeriaItaliana18k && activos.realizable.joyeriaItaliana18k.grams) || 0).toFixed(2)}g)</td>
+              <tr style="border-bottom: 1px solid #f0f3ed;">
+                <td style="padding: 4px 12px; color: #53685e;">• Oro Italiano 18K (${((activos.realizable && activos.realizable.joyeriaItaliana18k && activos.realizable.joyeriaItaliana18k.grams) || 0).toFixed(2)}g)</td>
                 <td style="padding: 4px 4px; text-align: right; color: #334155;" class="mono">$${((activos.realizable && activos.realizable.joyeriaItaliana18k && activos.realizable.joyeriaItaliana18k.totalValue) || 0).toLocaleString('es-CO')}</td>
               </tr>
-              <tr style="border-bottom: 1px solid #f1f5f9;">
-                <td style="padding: 4px 12px; color: #475569;">• Oro Nacional 18K (${((activos.realizable && activos.realizable.joyeriaNacional18k && activos.realizable.joyeriaNacional18k.grams) || 0).toFixed(2)}g)</td>
+              <tr style="border-bottom: 1px solid #f0f3ed;">
+                <td style="padding: 4px 12px; color: #53685e;">• Oro Nacional 18K (${((activos.realizable && activos.realizable.joyeriaNacional18k && activos.realizable.joyeriaNacional18k.grams) || 0).toFixed(2)}g)</td>
                 <td style="padding: 4px 4px; text-align: right; color: #334155;" class="mono">$${((activos.realizable && activos.realizable.joyeriaNacional18k && activos.realizable.joyeriaNacional18k.totalValue) || 0).toLocaleString('es-CO')}</td>
               </tr>
-              <tr style="border-bottom: 1px solid #f1f5f9;">
-                <td style="padding: 4px 12px; color: #475569;">• Granalla Oro Puro 24K Bóveda (${((activos.realizable && activos.realizable.oroPuro24kBoveda && activos.realizable.oroPuro24kBoveda.grams) || 0).toFixed(2)}g)</td>
+              <tr style="border-bottom: 1px solid #f0f3ed;">
+                <td style="padding: 4px 12px; color: #53685e;">• Granalla Oro Puro 24K Bóveda (${((activos.realizable && activos.realizable.oroPuro24kBoveda && activos.realizable.oroPuro24kBoveda.grams) || 0).toFixed(2)}g)</td>
                 <td style="padding: 4px 4px; text-align: right; color: #334155;" class="mono">$${((activos.realizable && activos.realizable.oroPuro24kBoveda && activos.realizable.oroPuro24kBoveda.totalValue) || 0).toLocaleString('es-CO')}</td>
               </tr>
-              <tr style="border-bottom: 1px solid #f1f5f9;">
-                <td style="padding: 4px 12px; color: #475569;">• Oro Puro 24K en Talleres Maquila (${((activos.realizable && activos.realizable.oroPuro24kEnTalleres && activos.realizable.oroPuro24kEnTalleres.grams) || 0).toFixed(2)}g)</td>
+              <tr style="border-bottom: 1px solid #f0f3ed;">
+                <td style="padding: 4px 12px; color: #53685e;">• Oro Puro 24K en Talleres Maquila (${((activos.realizable && activos.realizable.oroPuro24kEnTalleres && activos.realizable.oroPuro24kEnTalleres.grams) || 0).toFixed(2)}g)</td>
                 <td style="padding: 4px 4px; text-align: right; color: #334155;" class="mono">$${((activos.realizable && activos.realizable.oroPuro24kEnTalleres && activos.realizable.oroPuro24kEnTalleres.totalValue) || 0).toLocaleString('es-CO')}</td>
               </tr>
-              <tr style="border-bottom: 1px solid #f1f5f9;">
-                <td style="padding: 4px 12px; color: #475569;">• Retal de Oro 18K en Bóveda (${((activos.realizable && activos.realizable.retalOro18kBoveda && activos.realizable.retalOro18kBoveda.grams) || 0).toFixed(2)}g)</td>
+              <tr style="border-bottom: 1px solid #f0f3ed;">
+                <td style="padding: 4px 12px; color: #53685e;">• Retal de Oro 18K en Bóveda (${((activos.realizable && activos.realizable.retalOro18kBoveda && activos.realizable.retalOro18kBoveda.grams) || 0).toFixed(2)}g)</td>
                 <td style="padding: 4px 4px; text-align: right; color: #334155;" class="mono">$${((activos.realizable && activos.realizable.retalOro18kBoveda && activos.realizable.retalOro18kBoveda.totalValue) || 0).toLocaleString('es-CO')}</td>
               </tr>
               <tr style="border-top: 2px solid #0284c7; font-weight: 800; font-size: 0.88rem;">
@@ -4759,30 +4727,30 @@ const App = {
             </tbody>
           </table>
 
-          <h4 style="font-size: 0.92rem; color: #d4af37; border-bottom: 2px solid #d4af37; padding-bottom: 6px; margin-bottom: 10px; font-weight: 800;">
+          <h4 style="font-size: 0.92rem; color: #b79b68; border-bottom: 2px solid #b79b68; padding-bottom: 6px; margin-bottom: 10px; font-weight: 800;">
             3. PATRIMONIO NETO CONTABLE
           </h4>
           <table style="width: 100%; font-size: 0.8rem; border-collapse: collapse;">
             <tbody>
-              <tr style="border-bottom: 1px solid #f1f5f9;">
+              <tr style="border-bottom: 1px solid #f0f3ed;">
                 <td style="padding: 6px 4px; color: #334155;">3.1 Capital Social Inicial & Aportes Bóveda</td>
                 <td style="padding: 6px 4px; text-align: right;" class="mono">$${(patrimonio.initialCapitalContribution || 0).toLocaleString('es-CO')}</td>
               </tr>
-              <tr style="border-bottom: 1px solid #f1f5f9;">
+              <tr style="border-bottom: 1px solid #f0f3ed;">
                 <td style="padding: 6px 4px; color: #334155;">3.2 Utilidades Acumuladas por Despachos</td>
                 <td style="padding: 6px 4px; text-align: right; color: #059669;" class="mono">$${(patrimonio.accumulatedProfitMargin || 0).toLocaleString('es-CO')}</td>
               </tr>
-              <tr style="border-bottom: 1px solid #f1f5f9;">
+              <tr style="border-bottom: 1px solid #f0f3ed;">
                 <td style="padding: 6px 4px; color: #334155;">3.3 Respaldo Fino Equivalente</td>
-                <td style="padding: 6px 4px; text-align: right; color: #b45309;" class="mono">${(patrimonio.netWorthGramsEq24k || 0).toFixed(2)} g 24K</td>
+                <td style="padding: 6px 4px; text-align: right; color: #826a3e;" class="mono">${(patrimonio.netWorthGramsEq24k || 0).toFixed(2)} g 24K</td>
               </tr>
-              <tr style="border-top: 2px solid #d4af37; font-weight: 800; font-size: 0.88rem;">
+              <tr style="border-top: 2px solid #b79b68; font-weight: 800; font-size: 0.88rem;">
                 <td style="padding: 8px 4px;">TOTAL PATRIMONIO NETO:</td>
-                <td style="padding: 8px 4px; text-align: right; color: #d4af37;" class="mono">$${(patrimonio.netWorth || 0).toLocaleString('es-CO')}</td>
+                <td style="padding: 8px 4px; text-align: right; color: #b79b68;" class="mono">$${(patrimonio.netWorth || 0).toLocaleString('es-CO')}</td>
               </tr>
-              <tr style="border-top: 2px solid #334155; font-weight: 800; font-size: 0.88rem; background: #f8fafc;">
+              <tr style="border-top: 2px solid #334155; font-weight: 800; font-size: 0.88rem; background: #fafbf7;">
                 <td style="padding: 8px 4px;">TOTAL PASIVO + PATRIMONIO:</td>
-                <td style="padding: 8px 4px; text-align: right; color: #0f172a;" class="mono">$${((pasivos.total || 0) + (patrimonio.netWorth || 0)).toLocaleString('es-CO')}</td>
+                <td style="padding: 8px 4px; text-align: right; color: #163e35;" class="mono">$${((pasivos.total || 0) + (patrimonio.netWorth || 0)).toLocaleString('es-CO')}</td>
               </tr>
             </tbody>
           </table>
@@ -4791,8 +4759,8 @@ const App = {
       </div>
 
       <!-- Ratios de Solvencia en el Documento -->
-      <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 16px; margin-bottom: 30px;">
-        <div style="font-size: 0.78rem; font-weight: 700; color: #475569; text-transform: uppercase; margin-bottom: 8px;">
+      <div style="background: #fafbf7; border: 1px solid #dddfd7; border-radius: 8px; padding: 12px 16px; margin-bottom: 30px;">
+        <div style="font-size: 0.78rem; font-weight: 700; color: #53685e; text-transform: uppercase; margin-bottom: 8px;">
           INDICADORES DE LIQUIDEZ Y RESPALDO FINANCIERO:
         </div>
         <div style="display: flex; justify-content: space-between; font-size: 0.78rem; color: #334155; flex-wrap: wrap; gap: 8px;">
@@ -4806,19 +4774,18 @@ const App = {
       <!-- Firmas Oficiales de Auditoría -->
       <div style="margin-top: 40px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 24px; text-align: center;">
         <div>
-          <div style="border-bottom: 1px solid #94a3b8; height: 40px; margin-bottom: 8px;"></div>
-          <strong style="font-size: 0.82rem; color: #0f172a; display: block;">GERENCIA GENERAL</strong>
-          <span style="font-size: 0.72rem; color: #64748b;">Representante Legal</span>
+          <div style="border-bottom: 1px solid #a0afa4; height: 40px; margin-bottom: 8px;"></div>
+          <strong style="font-size: 0.82rem; color: #163e35; display: block;">GERENCIA GENERAL</strong>
+          <span style="font-size: 0.72rem; color: #627469;">Representante Legal</span>
         </div>
         <div>
-          <div style="border-bottom: 1px solid #94a3b8; height: 40px; margin-bottom: 8px;"></div>
-          <strong style="font-size: 0.82rem; color: #0f172a; display: block;">CONTADOR PÚBLICO</strong>
-          <span style="font-size: 0.72rem; color: #64748b;">T.P. No. 248911-T</span>
+          <div style="border-bottom: 1px solid #a0afa4; height: 40px; margin-bottom: 8px;"></div>
+          <strong style="font-size: 0.82rem; color: #163e35; display: block;">CONTADOR PÚBLICO</strong>
         </div>
         <div>
-          <div style="border-bottom: 1px solid #94a3b8; height: 40px; margin-bottom: 8px;"></div>
-          <strong style="font-size: 0.82rem; color: #0f172a; display: block;">AUDITOR DE BÓVEDA</strong>
-          <span style="font-size: 0.72rem; color: #64748b;">Custodia de Valores & Metales</span>
+          <div style="border-bottom: 1px solid #a0afa4; height: 40px; margin-bottom: 8px;"></div>
+          <strong style="font-size: 0.82rem; color: #163e35; display: block;">AUDITOR DE BÓVEDA</strong>
+          <span style="font-size: 0.72rem; color: #627469;">Custodia de Valores & Metales</span>
         </div>
       </div>
     `;
@@ -4837,7 +4804,7 @@ const App = {
     const nowStr = (asOfDate ? new Date(asOfDate) : new Date()).toISOString().split('T')[0];
 
     const lines = [];
-    lines.push('NEXUS JOYAS MAYORISTAS S.A.S - BALANCE GENERAL Y ESTADO PATRIMONIAL');
+    lines.push('ÁUREA · MAYORISTAS - BALANCE GENERAL Y ESTADO PATRIMONIAL');
     lines.push(`Fecha de Corte Contable: ${nowStr}`);
     lines.push(`Moneda: COP ($ Pesos Colombianos)`);
     lines.push('');
@@ -4847,12 +4814,12 @@ const App = {
     lines.push('1;TOTAL ACTIVOS;;' + (activos.total || 0) + ';Equivalente a ' + (activos.totalGramsEq24k || 0) + ' g 24K');
     lines.push('1.1;ACTIVOS DISPONIBLES (CAJA Y BANCOS);;' + ((activos.disponible && activos.disponible.total) || 0) + ';');
     ((activos.disponible && activos.disponible.cuentas) || []).forEach((c, idx) => {
-      lines.push(`1.1.${idx + 1};${c.name};;${c.balance};${c.type}`);
+      lines.push(['1.1.'+(idx+1),c.name,'',c.balance,c.type].map(AureaSafe.csvCell).join(';'));
     });
 
     lines.push('1.2;ACTIVOS EXIGIBLES (CARTERA CXC);' + ((activos.exigible && activos.exigible.totalGrams18k) || 0) + ' g 18K;' + ((activos.exigible && activos.exigible.totalPesos) || 0) + ';Cartera mayorista respaldada en metal');
     ((activos.exigible && activos.exigible.debtors) || []).forEach((d, idx) => {
-      lines.push(`1.2.${idx + 1};Cliente: ${d.name} (${d.city || ''});${d.debtGrams} g 18K;${d.debtPesos};Cupo: ${d.creditLimit}`);
+      lines.push(['1.2.'+(idx+1),'Cliente: '+d.name+' ('+(d.city||'')+')',d.debtGrams+' g 18K',d.debtPesos,'Cupo: '+d.creditLimit].map(AureaSafe.csvCell).join(';'));
     });
 
     lines.push('1.3;ACTIVOS REALIZABLES (INVENTARIO FISICO METALES);' + ((activos.realizable && activos.realizable.totalInventoryGrams) || 0) + ' g;' + ((activos.realizable && activos.realizable.totalInventoryValue) || 0) + ';');
@@ -4870,11 +4837,11 @@ const App = {
     lines.push('2;TOTAL PASIVOS EXIGIBLES;;' + (pasivos.total || 0) + ';Obligaciones comerciales');
     lines.push('2.1;Pasivos Proveedores Oro y Joyeria;;' + (pasivos.proveedoresPesos || 0) + ';');
     ((pasivos.creditors || []).filter(c => (c.balanceDuePesos || 0) > 0)).forEach((p, idx) => {
-      lines.push(`2.1.${idx + 1};Proveedor: ${p.name};;${p.balanceDuePesos};${p.category}`);
+      lines.push(['2.1.'+(idx+1),'Proveedor: '+p.name,'',p.balanceDuePesos,p.category].map(AureaSafe.csvCell).join(';'));
     });
     lines.push('2.2;Pasivos Manos de Obra Talleres;;' + (pasivos.manosDeObraTalleres || 0) + ';');
     ((pasivos.creditors || []).filter(c => (c.balanceManoDeObra || 0) > 0)).forEach((w, idx) => {
-      lines.push(`2.2.${idx + 1};Taller: ${w.name};${w.puroInHandsGrams} g 24K en custodia;${w.balanceManoDeObra};Mano de obra pendiente`);
+      lines.push(['2.2.'+(idx+1),'Taller: '+w.name,w.puroInHandsGrams+' g 24K en custodia',w.balanceManoDeObra,'Mano de obra pendiente'].map(AureaSafe.csvCell).join(';'));
     });
 
     lines.push('');
@@ -4897,7 +4864,7 @@ const App = {
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.setAttribute('download', `Balance_General_Nexus_${nowStr}.csv`);
+    link.setAttribute('download', `Balance_General_Aurea_${nowStr}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -4920,7 +4887,7 @@ const App = {
     if (selForm) {
       const currentVal = selForm.value;
       selForm.innerHTML = methods
-        .map(pm => `<option value="${pm.name}">${pm.name} (${pm.type || 'Cuenta'})</option>`)
+        .map(pm => `<option value="${escapeHTML(pm.name)}">${escapeHTML(pm.name)} (${escapeHTML(pm.type || 'Cuenta')})</option>`)
         .join('');
       if (currentVal && Array.from(selForm.options).some(o => o.value === currentVal)) {
         selForm.value = currentVal;
@@ -4931,7 +4898,7 @@ const App = {
       const currentVal = selFilter.value;
       let opts = '<option value="all">Todos los Medios / Cuentas</option>';
       methods.forEach(pm => {
-        opts += `<option value="${pm.name}">${pm.name}</option>`;
+        opts += `<option value="${escapeHTML(pm.name)}">${escapeHTML(pm.name)}</option>`;
       });
       selFilter.innerHTML = opts;
       if (currentVal && Array.from(selFilter.options).some(o => o.value === currentVal)) {
@@ -4945,7 +4912,7 @@ const App = {
 
     const tbody = document.getElementById('gastos-table-body');
     if (tbody) {
-      tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; padding: 30px; color: var(--gold-light);">⏳ Cargando gastos operativos...</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; padding: 30px; color: var(--gold-light);"> Cargando gastos operativos...</td></tr>`;
     }
 
     try {
@@ -4965,7 +4932,7 @@ const App = {
         params.append('search', this.gastosSearchQuery);
       }
 
-      const res = await fetch(`/api/gastos-operativos?${params.toString()}`);
+      const res = await this.apiFetch(`/api/gastos-operativos?${params.toString()}`);
       const data = await res.json();
 
       if (data.success) {
@@ -5014,7 +4981,7 @@ const App = {
     const benchmarkPill = document.getElementById('gastos-benchmark-pill');
     const benchmarkRate = Number(this.averages?.promedioPuro24k ?? this.rates?.override_promedioPuro24k ?? this.rates?.oro24k_fino_benchmark ?? 0);
     if (benchmarkPill) {
-      benchmarkPill.innerText = `👑 Benchmark 24K: $${benchmarkRate.toLocaleString('es-CO')}/g`;
+      benchmarkPill.innerText = ` Benchmark 24K: $${benchmarkRate.toLocaleString('es-CO')}/g`;
     }
 
     // 4 Executive KPI Cards
@@ -5047,7 +5014,7 @@ const App = {
     if (elTopCatSub) {
       elTopCatSub.innerText = `${topCat.percentage || 0}% del gasto total ($${(topCat.amount || 0).toLocaleString('es-CO')})`;
     }
-    if (elTopIcon) elTopIcon.innerText = topCat.icon || '🏷️';
+    if (elTopIcon) elTopIcon.innerText = topCat.icon || '';
 
     const elRatio = document.getElementById('gastos-kpi-ratio-sales');
     const elRatioSub = document.getElementById('gastos-kpi-ratio-sales-sub');
@@ -5079,7 +5046,7 @@ const App = {
         barContainer.innerHTML = catBreakdown.map(c => `
           <div class="asset-alloc-segment" 
                style="width: ${Math.max(1.5, c.percentage)}%; background-color: ${c.color};" 
-               title="${c.category}: $${c.amount.toLocaleString('es-CO')} (${c.percentage}%)">
+               title="${escapeHTML(c.category)}: $${c.amount.toLocaleString('es-CO')} (${c.percentage}%)">
           </div>
         `).join('');
       }
@@ -5093,12 +5060,12 @@ const App = {
           const isSelected = this.gastosCategoryFilter === c.category;
           return `
             <div class="alloc-legend-item ${isSelected ? 'active-filter' : ''}" 
-                 onclick="App.setGastosCategoryFilter('${c.category === this.gastosCategoryFilter ? 'all' : c.category}')"
+                 onclick="App.setGastosCategoryFilter('${escapeHTML(c.category === this.gastosCategoryFilter ? 'all' : c.category)}')"
                  style="cursor: pointer; padding: 4px 8px; border-radius: 6px; background: ${isSelected ? 'rgba(212,175,55,0.15)' : 'transparent'}; border: 1px solid ${isSelected ? 'var(--gold-primary)' : 'transparent'}; transition: all 0.2s ease;"
-                 title="Haz clic para filtrar por ${c.category}">
+                 title="Haz clic para filtrar por ${escapeHTML(c.category)}">
               <span class="legend-color-dot" style="background: ${c.color};"></span>
               <span style="font-size: 0.78rem;">
-                ${c.icon || '🏷️'} <strong>${c.category}</strong>: 
+                ${c.icon || ''} <strong>${escapeHTML(c.category)}</strong>:
                 <span class="mono" style="color: ${c.color}; font-weight: 700;">${c.percentage}%</span> 
                 ($${c.amount.toLocaleString('es-CO')})
               </span>
@@ -5123,7 +5090,7 @@ const App = {
         tbody.innerHTML = `
           <tr>
             <td colspan="8" style="text-align: center; padding: 48px 20px;">
-              <div style="font-size: 2.2rem; margin-bottom: 8px;">📂</div>
+              <div style="font-size: 2.2rem; margin-bottom: 8px;"></div>
               <div style="font-size: 1rem; font-weight: 700; color: var(--text-headings);">No se encontraron egresos operativos</div>
               <p style="font-size: 0.8rem; color: var(--text-dim); margin-top: 4px;">Prueba cambiando el período de tiempo o limpiando los filtros de búsqueda.</p>
               ${canEditGastos ? `<button class="btn btn-gold btn-sm" style="margin-top: 12px;" onclick="App.openModalNuevoGasto()">+ Registrar Primer Gasto</button>` : ''}
@@ -5137,39 +5104,39 @@ const App = {
             ? dateObj.toLocaleDateString('es-CO', { year: 'numeric', month: 'short', day: 'numeric' })
             : exp.date;
           
-          const catMeta = (catBreakdown.find(c => c.category === exp.category)) || { color: '#d4af37', icon: '🧾' };
-          const categoryColor = catMeta.color || '#d4af37';
-          const categoryIcon = catMeta.icon || '🧾';
+          const catMeta = (catBreakdown.find(c => c.category === exp.category)) || { color: '#b79b68', icon: '' };
+          const categoryColor = catMeta.color || '#b79b68';
+          const categoryIcon = catMeta.icon || '';
 
           return `
             <tr style="transition: background 0.2s ease;">
               <td class="mono" style="font-size: 0.8rem; color: var(--text-dim); white-space: nowrap;">
-                📅 ${formattedDate}
+                 ${formattedDate}
               </td>
               <td>
                 <div style="font-weight: 700; color: var(--text-headings); font-size: 0.88rem;">
-                  ${exp.concept || 'Gasto Operativo'}
+                  ${escapeHTML(exp.concept || 'Gasto Operativo')}
                 </div>
-                ${exp.notes ? `<div style="font-size: 0.72rem; color: var(--text-dim); margin-top: 2px;">💬 ${exp.notes}</div>` : ''}
+                ${exp.notes ? `<div style="font-size: 0.72rem; color: var(--text-dim); margin-top: 2px;"> ${escapeHTML(exp.notes)}</div>` : ''}
               </td>
               <td>
                 <span class="ticker-badge" style="background: ${categoryColor}18; color: ${categoryColor}; border: 1px solid ${categoryColor}40; font-size: 0.75rem; padding: 2px 8px; border-radius: 9999px; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px;">
                   <span>${categoryIcon}</span>
-                  <span>${exp.category || 'Varios'}</span>
+                  <span>${escapeHTML(exp.category || 'Varios')}</span>
                 </span>
               </td>
               <td style="font-size: 0.8rem; color: var(--text-muted);">
                 <div style="display: flex; align-items: center; gap: 4px;">
-                  <span>💳</span>
-                  <span>${exp.method || exp.paymentMethod || 'Efectivo'}</span>
+                  <span></span>
+                  <span>${escapeHTML(exp.method || exp.paymentMethod || 'Efectivo')}</span>
                 </div>
               </td>
               <td style="font-size: 0.82rem; color: var(--text-headings);">
-                ${exp.beneficiary || exp.thirdParty ? `<strong>${exp.beneficiary || exp.thirdParty}</strong>` : '<span style="color: var(--text-dim); font-style: italic;">Sin especificar</span>'}
+                ${exp.beneficiary || exp.thirdParty ? `<strong>${escapeHTML(exp.beneficiary || exp.thirdParty)}</strong>` : '<span style="color: var(--text-dim); font-style: italic;">Sin especificar</span>'}
               </td>
               <td>
                 <span class="mono" style="font-size: 0.78rem; background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.1); color: var(--gold-light);">
-                  ${exp.reference || 'S/N'}
+                  ${escapeHTML(exp.reference || 'S/N')}
                 </span>
               </td>
               <td class="text-right mono" style="font-size: 0.95rem; font-weight: 800; color: #f87171; white-space: nowrap;">
@@ -5178,13 +5145,13 @@ const App = {
               <td class="text-center" style="white-space: nowrap;">
                 <div style="display: flex; justify-content: center; align-items: center; gap: 6px;">
                   <button type="button" class="btn btn-secondary btn-sm" onclick="App.openEditGastoModal('${exp.id}')" title="Editar este gasto" style="padding: 5px 8px; font-size: 0.76rem; display: inline-flex; align-items: center; gap: 4px;" ${!canEditGastos ? 'disabled' : ''}>
-                    <span>✏️</span> Editar
+                    <span></span> Editar
                   </button>
                   <button type="button" class="btn btn-outline-gold btn-sm" onclick="App.printSingleGastoVoucher('${exp.id}')" title="Ver Comprobante / Factura" style="padding: 5px 8px; font-size: 0.76rem; display: inline-flex; align-items: center; gap: 4px;" ${!canExportGastos ? 'disabled' : ''}>
-                    <span>🧾</span> Factura
+                    <span></span> Factura
                   </button>
                   <button type="button" class="btn btn-secondary btn-sm" onclick="App.deleteGasto('${exp.id}')" title="Eliminar gasto" style="padding: 5px 8px; font-size: 0.76rem; color: #ef4444; border-color: rgba(239,68,68,0.3); display: inline-flex; align-items: center; gap: 4px;" ${!canDeleteGastos ? 'disabled' : ''}>
-                    <span>🗑️</span> Borrar
+                    <span></span> Borrar
                   </button>
                 </div>
               </td>
@@ -5219,7 +5186,7 @@ const App = {
     const isVisible = rangeContainer.style.display === 'flex';
     rangeContainer.style.display = isVisible ? 'none' : 'flex';
     if (!isVisible) {
-      const today = new Date().toISOString().split('T')[0];
+      const today = AureaSafe.dateKey();
       const startInput = document.getElementById('gastos-date-start');
       const endInput = document.getElementById('gastos-date-end');
       if (startInput && !startInput.value) startInput.value = today;
@@ -5302,7 +5269,7 @@ const App = {
     const submitBtn = document.getElementById('btn-submit-gasto');
 
     if (idInput) idInput.value = '';
-    if (dateInput) dateInput.value = new Date().toISOString().split('T')[0];
+    if (dateInput) dateInput.value = AureaSafe.dateKey();
     if (catInput) catInput.value = 'Nómina & Comisiones Mayoristas';
     if (conceptInput) conceptInput.value = '';
     if (amountInput) amountInput.value = '';
@@ -5310,7 +5277,7 @@ const App = {
     if (refInput) refInput.value = 'EG-' + Date.now().toString().slice(-6);
     if (notesInput) notesInput.value = '';
     if (titleEl) titleEl.innerText = 'Registrar Nuevo Gasto Operativo';
-    if (submitBtn) submitBtn.innerHTML = '💾 Guardar Gasto';
+    if (submitBtn) submitBtn.innerHTML = ' Guardar Gasto';
 
     this.openModal('modal-gasto-operativo');
     if (window.soundEngine) window.soundEngine.playChime();
@@ -5352,7 +5319,7 @@ const App = {
     if (refInput) refInput.value = exp.reference || '';
     if (notesInput) notesInput.value = exp.notes || '';
     if (titleEl) titleEl.innerText = 'Editar Gasto Operativo';
-    if (submitBtn) submitBtn.innerHTML = '💾 Actualizar Cambios';
+    if (submitBtn) submitBtn.innerHTML = ' Actualizar Cambios';
 
     this.openModal('modal-gasto-operativo');
     if (window.soundEngine) window.soundEngine.playChime();
@@ -5412,7 +5379,7 @@ const App = {
       const url = isEdit ? `/api/gastos-operativos/${id}` : '/api/gastos-operativos';
       const methodHttp = isEdit ? 'PUT' : 'POST';
 
-      const res = await fetch(url, {
+      const res = await this.apiFetch(url, {
         method: methodHttp,
         headers: {
           'Content-Type': 'application/json',
@@ -5453,7 +5420,7 @@ const App = {
     }
 
     try {
-      const res = await fetch(`/api/gastos-operativos/${gastoId}`, {
+      const res = await this.apiFetch(`/api/gastos-operativos/${gastoId}`, {
         method: 'DELETE',
         headers: {
           'Authorization': 'Bearer ' + (this.authToken || '')
@@ -5500,61 +5467,60 @@ const App = {
     const grams24kEq = benchmark > 0 ? (exp.amount / benchmark).toFixed(2) : '0.00';
 
     printContainer.innerHTML = `
-      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #0f172a; padding: 24px; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 8px;">
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #163e35; padding: 24px; background: #ffffff; border: 1px solid #cbd2c9; border-radius: 8px;">
         
         <!-- Header -->
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #d4af37; padding-bottom: 16px; margin-bottom: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #b79b68; padding-bottom: 16px; margin-bottom: 20px;">
           <div>
-            <h2 style="margin: 0; color: #0f172a; font-size: 1.4rem; letter-spacing: 0.05em; font-weight: 800;">NEXUS JOYAS MAYORISTAS S.A.S</h2>
-            <div style="font-size: 0.8rem; color: #64748b; margin-top: 2px;">NIT: 901.488.320-4 • Régimen Mayorista de Metales Preciosos</div>
-            <div style="font-size: 0.8rem; color: #64748b;">Bóveda Central de Valores • Edificio San Francisco Plaza, Piso 8</div>
+            <h2 style="margin: 0; color: #163e35; font-size: 1.4rem; letter-spacing: 0.05em; font-weight: 800;"><img src="/assets/aurea-symbol.svg" alt="" style="width:32px;height:32px;vertical-align:middle;margin-right:10px;">áurea <span style="font:500 10px Inter,Arial,sans-serif;letter-spacing:2px;">MAYORISTAS</span></h2>
+            <div style="font-size: 0.8rem; color: #627469;">Bóveda Central de Valores • Edificio San Francisco Plaza, Piso 8</div>
           </div>
           <div style="text-align: right;">
-            <div style="font-size: 0.72rem; color: #64748b; text-transform: uppercase; font-weight: 700;">COMPROBANTE DE EGRESO OFICIAL</div>
-            <div style="font-size: 1.2rem; font-weight: 800; color: #dc2626; font-family: monospace;">N° ${exp.reference || exp.id}</div>
-            <div style="font-size: 0.78rem; color: #475569; margin-top: 4px;">${dateFormatted}</div>
+            <div style="font-size: 0.72rem; color: #627469; text-transform: uppercase; font-weight: 700;">COMPROBANTE DE EGRESO OFICIAL</div>
+            <div style="font-size: 1.2rem; font-weight: 800; color: #dc2626; font-family: monospace;">N° ${escapeHTML(exp.reference || exp.id)}</div>
+            <div style="font-size: 0.78rem; color: #53685e; margin-top: 4px;">${dateFormatted}</div>
           </div>
         </div>
 
         <!-- Voucher Details Table -->
         <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 0.88rem;">
           <tbody>
-            <tr style="border-bottom: 1px solid #e2e8f0;">
-              <td style="padding: 10px 8px; width: 30%; color: #64748b; font-weight: 600;">Beneficiario / Proveedor:</td>
-              <td style="padding: 10px 8px; font-weight: 800; color: #0f172a; font-size: 1rem;">
-                ${exp.beneficiary || exp.thirdParty || 'Gastos Generales de Bóveda'}
+            <tr style="border-bottom: 1px solid #dddfd7;">
+              <td style="padding: 10px 8px; width: 30%; color: #627469; font-weight: 600;">Beneficiario / Proveedor:</td>
+              <td style="padding: 10px 8px; font-weight: 800; color: #163e35; font-size: 1rem;">
+                ${escapeHTML(exp.beneficiary || exp.thirdParty || 'Gastos Generales de Bóveda')}
               </td>
             </tr>
-            <tr style="border-bottom: 1px solid #e2e8f0; background: #f8fafc;">
-              <td style="padding: 10px 8px; color: #64748b; font-weight: 600;">Categoría Operativa:</td>
+            <tr style="border-bottom: 1px solid #dddfd7; background: #fafbf7;">
+              <td style="padding: 10px 8px; color: #627469; font-weight: 600;">Categoría Operativa:</td>
               <td style="padding: 10px 8px; font-weight: 700; color: #4338ca;">
-                ${exp.category || 'General'}
+                ${escapeHTML(exp.category || 'General')}
               </td>
             </tr>
-            <tr style="border-bottom: 1px solid #e2e8f0;">
-              <td style="padding: 10px 8px; color: #64748b; font-weight: 600;">Concepto / Justificación:</td>
-              <td style="padding: 10px 8px; color: #1e293b; line-height: 1.4;">
-                ${exp.concept}
+            <tr style="border-bottom: 1px solid #dddfd7;">
+              <td style="padding: 10px 8px; color: #627469; font-weight: 600;">Concepto / Justificación:</td>
+              <td style="padding: 10px 8px; color: #243b33; line-height: 1.4;">
+                ${escapeHTML(exp.concept)}
               </td>
             </tr>
-            <tr style="border-bottom: 1px solid #e2e8f0; background: #f8fafc;">
-              <td style="padding: 10px 8px; color: #64748b; font-weight: 600;">Medio de Pago / Cuenta:</td>
+            <tr style="border-bottom: 1px solid #dddfd7; background: #fafbf7;">
+              <td style="padding: 10px 8px; color: #627469; font-weight: 600;">Medio de Pago / Cuenta:</td>
               <td style="padding: 10px 8px; font-weight: 600; color: #0284c7;">
-                ${exp.method || exp.paymentMethod || 'Efectivo en Caja Bóveda'}
+                ${escapeHTML(exp.method || exp.paymentMethod || 'Efectivo en Caja Bóveda')}
               </td>
             </tr>
             ${exp.notes ? `
-            <tr style="border-bottom: 1px solid #e2e8f0;">
-              <td style="padding: 10px 8px; color: #64748b; font-weight: 600;">Observaciones Contables:</td>
-              <td style="padding: 10px 8px; color: #475569; font-style: italic;">
-                ${exp.notes}
+            <tr style="border-bottom: 1px solid #dddfd7;">
+              <td style="padding: 10px 8px; color: #627469; font-weight: 600;">Observaciones Contables:</td>
+              <td style="padding: 10px 8px; color: #53685e; font-style: italic;">
+                ${escapeHTML(exp.notes)}
               </td>
             </tr>` : ''}
-            <tr style="border-top: 2px solid #0f172a; background: #fef2f2;">
+            <tr style="border-top: 2px solid #163e35; background: #fef2f2;">
               <td style="padding: 14px 8px; font-weight: 800; color: #dc2626; font-size: 1.05rem;">TOTAL PAGADO / DEDUCIDO:</td>
               <td style="padding: 14px 8px; font-weight: 900; color: #dc2626; font-size: 1.35rem; font-family: monospace;">
                 $${(Number(exp.amount) || 0).toLocaleString('es-CO')} COP
-                <span style="font-size: 0.85rem; color: #b45309; font-weight: 700; margin-left: 12px;">(≈ ${grams24kEq} g Puro 24K)</span>
+                <span style="font-size: 0.85rem; color: #826a3e; font-weight: 700; margin-left: 12px;">(≈ ${grams24kEq} g Puro 24K)</span>
               </td>
             </tr>
           </tbody>
@@ -5563,14 +5529,14 @@ const App = {
         <!-- Signatures -->
         <div style="margin-top: 48px; display: grid; grid-template-columns: 1fr 1fr; gap: 40px; text-align: center;">
           <div>
-            <div style="border-bottom: 1px solid #94a3b8; height: 44px; margin-bottom: 8px;"></div>
-            <strong style="font-size: 0.85rem; color: #0f172a; display: block;">ENTREGADO / AUTORIZADO</strong>
-            <span style="font-size: 0.74rem; color: #64748b;">Administración & Custodia de Bóveda</span>
+            <div style="border-bottom: 1px solid #a0afa4; height: 44px; margin-bottom: 8px;"></div>
+            <strong style="font-size: 0.85rem; color: #163e35; display: block;">ENTREGADO / AUTORIZADO</strong>
+            <span style="font-size: 0.74rem; color: #627469;">Administración & Custodia de Bóveda</span>
           </div>
           <div>
-            <div style="border-bottom: 1px solid #94a3b8; height: 44px; margin-bottom: 8px;"></div>
-            <strong style="font-size: 0.85rem; color: #0f172a; display: block;">RECIBIDO A CONFORMIDAD</strong>
-            <span style="font-size: 0.74rem; color: #64748b;">C.C. / NIT Beneficiario</span>
+            <div style="border-bottom: 1px solid #a0afa4; height: 44px; margin-bottom: 8px;"></div>
+            <strong style="font-size: 0.85rem; color: #163e35; display: block;">RECIBIDO A CONFORMIDAD</strong>
+            <span style="font-size: 0.74rem; color: #627469;">C.C. / NIT Beneficiario</span>
           </div>
         </div>
 
@@ -5594,7 +5560,7 @@ const App = {
 
     const titleEl = document.getElementById('print-gastos-modal-title');
     const subEl = document.getElementById('print-gastos-modal-subtitle');
-    if (titleEl) titleEl.innerText = 'Certificado de Gastos Operativos (OPEX)';
+    if (titleEl) titleEl.innerText = 'Reporte de gastos operativos';
     if (subEl) subEl.innerText = 'Reporte formal de auditoría de egresos operativos para contabilidad y gerencia';
 
     const { summary, expenses } = this.gastosData;
@@ -5615,19 +5581,18 @@ const App = {
     const periodText = periodLabels[this.gastosPeriod] || this.gastosPeriod;
 
     printContainer.innerHTML = `
-      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #0f172a; padding: 24px; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 8px;">
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #163e35; padding: 24px; background: #ffffff; border: 1px solid #cbd2c9; border-radius: 8px;">
         
         <!-- Document Header -->
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #d4af37; padding-bottom: 16px; margin-bottom: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #b79b68; padding-bottom: 16px; margin-bottom: 20px;">
           <div>
-            <h2 style="margin: 0; color: #0f172a; font-size: 1.4rem; letter-spacing: 0.05em; font-weight: 800;">NEXUS JOYAS MAYORISTAS S.A.S</h2>
-            <div style="font-size: 0.8rem; color: #64748b; margin-top: 2px;">NIT: 901.488.320-4 • Régimen Mayorista de Metales Preciosos</div>
-            <div style="font-size: 0.8rem; color: #64748b;">Libro Oficial de Gastos Operativos (OPEX) & Egresos de Bóveda</div>
+            <h2 style="margin: 0; color: #163e35; font-size: 1.4rem; letter-spacing: 0.05em; font-weight: 800;"><img src="/assets/aurea-symbol.svg" alt="" style="width:32px;height:32px;vertical-align:middle;margin-right:10px;">áurea <span style="font:500 10px Inter,Arial,sans-serif;letter-spacing:2px;">MAYORISTAS</span></h2>
+            <div style="font-size: 0.8rem; color: #627469;">Libro Oficial de Gastos Operativos (OPEX) & Egresos de Bóveda</div>
           </div>
           <div style="text-align: right;">
-            <div style="font-size: 0.72rem; color: #64748b; text-transform: uppercase; font-weight: 700;">PERÍODO AUDITADO</div>
-            <div style="font-size: 1.15rem; font-weight: 800; color: #d4af37;">${periodText}</div>
-            <div style="font-size: 0.78rem; color: #475569; margin-top: 4px;">Emisión: ${dateStr}</div>
+            <div style="font-size: 0.72rem; color: #627469; text-transform: uppercase; font-weight: 700;">PERÍODO AUDITADO</div>
+            <div style="font-size: 1.15rem; font-weight: 800; color: #b79b68;">${periodText}</div>
+            <div style="font-size: 0.78rem; color: #53685e; margin-top: 4px;">Emisión: ${dateStr}</div>
           </div>
         </div>
 
@@ -5639,15 +5604,15 @@ const App = {
             <div style="font-size: 0.7rem; color: #b91c1c;">${(summary.totalGrams24kEquivalent || 0).toFixed(2)} g 24K eq.</div>
           </div>
 
-          <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; padding: 10px; text-align: center;">
-            <div style="font-size: 0.72rem; color: #d97706; font-weight: 700; text-transform: uppercase;">Gasto Prom. Diario</div>
-            <div style="font-size: 1.2rem; font-weight: 900; color: #d97706; font-family: monospace;">$${(summary.averageDaily || 0).toLocaleString('es-CO')}</div>
-            <div style="font-size: 0.7rem; color: #92400e;">Burn Rate</div>
+          <div style="background: #f6f3e9; border: 1px solid #fde68a; border-radius: 6px; padding: 10px; text-align: center;">
+            <div style="font-size: 0.72rem; color: #826a3e; font-weight: 700; text-transform: uppercase;">Gasto Prom. Diario</div>
+            <div style="font-size: 1.2rem; font-weight: 900; color: #826a3e; font-family: monospace;">$${(summary.averageDaily || 0).toLocaleString('es-CO')}</div>
+            <div style="font-size: 0.7rem; color: #6c5731;">Burn Rate</div>
           </div>
 
           <div style="background: #f5f3ff; border: 1px solid #ddd6fe; border-radius: 6px; padding: 10px; text-align: center;">
             <div style="font-size: 0.72rem; color: #7c3aed; font-weight: 700; text-transform: uppercase;">Mayor Impacto</div>
-            <div style="font-size: 0.95rem; font-weight: 800; color: #7c3aed; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${summary.topCategory ? summary.topCategory.category : 'N/A'}</div>
+            <div style="font-size: 0.95rem; font-weight: 800; color: #7c3aed; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHTML(summary.topCategory ? summary.topCategory.category : 'N/A')}</div>
             <div style="font-size: 0.7rem; color: #6d28d9;">${summary.topCategory ? summary.topCategory.percentage : 0}% del total</div>
           </div>
 
@@ -5659,12 +5624,12 @@ const App = {
         </div>
 
         <!-- Category Breakdown Table -->
-        <h4 style="font-size: 0.92rem; color: #0f172a; border-bottom: 1px solid #cbd5e1; padding-bottom: 6px; margin-bottom: 10px; font-weight: 800;">
+        <h4 style="font-size: 0.92rem; color: #163e35; border-bottom: 1px solid #cbd2c9; padding-bottom: 6px; margin-bottom: 10px; font-weight: 800;">
           1. RESUMEN CONSOLIDADO POR CENTRO DE COSTOS / CATEGORÍA
         </h4>
         <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem; margin-bottom: 24px;">
           <thead>
-            <tr style="background: #f1f5f9; text-align: left;">
+            <tr style="background: #f0f3ed; text-align: left;">
               <th style="padding: 6px 8px;">Categoría</th>
               <th style="padding: 6px 8px; text-align: center;">Movimientos</th>
               <th style="padding: 6px 8px; text-align: right;">Participación</th>
@@ -5673,14 +5638,14 @@ const App = {
           </thead>
           <tbody>
             ${(summary.categoryBreakdown || []).map(c => `
-              <tr style="border-bottom: 1px solid #e2e8f0;">
-                <td style="padding: 6px 8px; font-weight: 600; color: #1e293b;">${c.icon || '🏷️'} ${c.category}</td>
-                <td style="padding: 6px 8px; text-align: center; color: #64748b;">${c.count}</td>
+              <tr style="border-bottom: 1px solid #dddfd7;">
+                <td style="padding: 6px 8px; font-weight: 600; color: #243b33;">${c.icon || ''} ${escapeHTML(c.category)}</td>
+                <td style="padding: 6px 8px; text-align: center; color: #627469;">${c.count}</td>
                 <td style="padding: 6px 8px; text-align: right; font-weight: 700; color: ${c.color || '#334155'};">${c.percentage}%</td>
                 <td style="padding: 6px 8px; text-align: right; font-weight: 800; font-family: monospace; color: #dc2626;">$${c.amount.toLocaleString('es-CO')}</td>
               </tr>
             `).join('')}
-            <tr style="border-top: 2px solid #0f172a; font-weight: 800; background: #f8fafc;">
+            <tr style="border-top: 2px solid #163e35; font-weight: 800; background: #fafbf7;">
               <td style="padding: 8px;" colspan="2">TOTAL CONSOLIDADO:</td>
               <td style="padding: 8px; text-align: right;">100%</td>
               <td style="padding: 8px; text-align: right; color: #dc2626; font-size: 0.95rem; font-family: monospace;">$${(summary.totalExpenses || 0).toLocaleString('es-CO')}</td>
@@ -5689,12 +5654,12 @@ const App = {
         </table>
 
         <!-- Detailed Records Table -->
-        <h4 style="font-size: 0.92rem; color: #0f172a; border-bottom: 1px solid #cbd5e1; padding-bottom: 6px; margin-bottom: 10px; font-weight: 800;">
+        <h4 style="font-size: 0.92rem; color: #163e35; border-bottom: 1px solid #cbd2c9; padding-bottom: 6px; margin-bottom: 10px; font-weight: 800;">
           2. DETALLE DE MOVIMIENTOS Y COMPROBANTES (${expenses.length} REGISTROS)
         </h4>
         <table style="width: 100%; border-collapse: collapse; font-size: 0.78rem; margin-bottom: 30px;">
           <thead>
-            <tr style="background: #f1f5f9; text-align: left;">
+            <tr style="background: #f0f3ed; text-align: left;">
               <th style="padding: 6px 6px;">Fecha</th>
               <th style="padding: 6px 6px;">Concepto</th>
               <th style="padding: 6px 6px;">Categoría</th>
@@ -5706,13 +5671,13 @@ const App = {
           </thead>
           <tbody>
             ${expenses.map(e => `
-              <tr style="border-bottom: 1px solid #f1f5f9;">
-                <td style="padding: 5px 6px; font-family: monospace; color: #64748b;">${e.date ? e.date.split('T')[0] : ''}</td>
-                <td style="padding: 5px 6px; font-weight: 600; color: #0f172a;">${e.concept}</td>
-                <td style="padding: 5px 6px; color: #475569;">${e.category}</td>
-                <td style="padding: 5px 6px; color: #334155;">${e.beneficiary || e.thirdParty || '-'}</td>
-                <td style="padding: 5px 6px; color: #64748b;">${e.method || e.paymentMethod || 'Efectivo'}</td>
-                <td style="padding: 5px 6px; font-family: monospace; color: #64748b;">${e.reference || '-'}</td>
+              <tr style="border-bottom: 1px solid #f0f3ed;">
+                <td style="padding: 5px 6px; font-family: monospace; color: #627469;">${e.date ? e.date.split('T')[0] : ''}</td>
+                <td style="padding: 5px 6px; font-weight: 600; color: #163e35;">${escapeHTML(e.concept)}</td>
+                <td style="padding: 5px 6px; color: #53685e;">${escapeHTML(e.category)}</td>
+                <td style="padding: 5px 6px; color: #334155;">${escapeHTML(e.beneficiary || e.thirdParty || '-')}</td>
+                <td style="padding: 5px 6px; color: #627469;">${escapeHTML(e.method || e.paymentMethod || 'Efectivo')}</td>
+                <td style="padding: 5px 6px; font-family: monospace; color: #627469;">${escapeHTML(e.reference || '-')}</td>
                 <td style="padding: 5px 6px; text-align: right; font-weight: 700; font-family: monospace; color: #dc2626;">$${(Number(e.amount) || 0).toLocaleString('es-CO')}</td>
               </tr>
             `).join('')}
@@ -5722,19 +5687,18 @@ const App = {
         <!-- Signatures -->
         <div style="margin-top: 40px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 24px; text-align: center;">
           <div>
-            <div style="border-bottom: 1px solid #94a3b8; height: 38px; margin-bottom: 8px;"></div>
-            <strong style="font-size: 0.82rem; color: #0f172a; display: block;">GERENCIA GENERAL</strong>
-            <span style="font-size: 0.72rem; color: #64748b;">Representante Legal</span>
+            <div style="border-bottom: 1px solid #a0afa4; height: 38px; margin-bottom: 8px;"></div>
+            <strong style="font-size: 0.82rem; color: #163e35; display: block;">GERENCIA GENERAL</strong>
+            <span style="font-size: 0.72rem; color: #627469;">Representante Legal</span>
           </div>
           <div>
-            <div style="border-bottom: 1px solid #94a3b8; height: 38px; margin-bottom: 8px;"></div>
-            <strong style="font-size: 0.82rem; color: #0f172a; display: block;">CONTADOR PÚBLICO</strong>
-            <span style="font-size: 0.72rem; color: #64748b;">T.P. No. 248911-T</span>
+            <div style="border-bottom: 1px solid #a0afa4; height: 38px; margin-bottom: 8px;"></div>
+            <strong style="font-size: 0.82rem; color: #163e35; display: block;">CONTADOR PÚBLICO</strong>
           </div>
           <div>
-            <div style="border-bottom: 1px solid #94a3b8; height: 38px; margin-bottom: 8px;"></div>
-            <strong style="font-size: 0.82rem; color: #0f172a; display: block;">AUDITOR DE BÓVEDA</strong>
-            <span style="font-size: 0.72rem; color: #64748b;">Custodia de Valores & Caja</span>
+            <div style="border-bottom: 1px solid #a0afa4; height: 38px; margin-bottom: 8px;"></div>
+            <strong style="font-size: 0.82rem; color: #163e35; display: block;">AUDITOR DE BÓVEDA</strong>
+            <span style="font-size: 0.72rem; color: #627469;">Custodia de Valores & Caja</span>
           </div>
         </div>
 
@@ -5757,10 +5721,10 @@ const App = {
     }
 
     const { summary, expenses } = this.gastosData;
-    const nowStr = new Date().toISOString().split('T')[0];
+    const nowStr = AureaSafe.dateKey();
 
     const lines = [];
-    lines.push('NEXUS JOYAS MAYORISTAS S.A.S - REPORTE DE GASTOS OPERATIVOS (OPEX)');
+    lines.push('ÁUREA · MAYORISTAS - REPORTE DE GASTOS OPERATIVOS (OPEX)');
     lines.push(`Fecha de Exportacion: ${nowStr}`);
     lines.push(`Periodo: ${this.gastosPeriod}`);
     lines.push(`Total Gastos COP: $${summary.totalExpenses || 0}`);
@@ -5782,21 +5746,21 @@ const App = {
       const method = (e.method || e.paymentMethod || '').replace(/;/g, ',');
       const amt = Number(e.amount) || 0;
 
-      lines.push(`${d};${t};${e.id};${ref};${cat};${concept};${ben};${method};${amt};${notes}`);
+      lines.push([d,t,e.id,e.reference,e.category,e.concept,e.beneficiary||e.thirdParty,e.method||e.paymentMethod,amt,e.notes].map(AureaSafe.csvCell).join(';'));
     });
 
     lines.push('');
     lines.push('--- CONSOLIDADO POR CATEGORIA ---;;;;;;;;;');
     lines.push('CATEGORIA;CANTIDAD;PORCENTAJE;TOTAL COP;;;;;');
     (summary.categoryBreakdown || []).forEach(c => {
-      lines.push(`${c.category};${c.count};${c.percentage}%;${c.amount};;;;;`);
+      lines.push([c.category,c.count,c.percentage+'%',c.amount,'','','','',''].map(AureaSafe.csvCell).join(';'));
     });
 
     const csvContent = '\uFEFF' + lines.join('\r\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.setAttribute('download', `Gastos_Operativos_Nexus_${nowStr}.csv`);
+    link.setAttribute('download', `Gastos_Operativos_Aurea_${nowStr}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -5811,7 +5775,7 @@ const App = {
       const savedToken = localStorage.getItem('nexus_token') || sessionStorage.getItem('nexus_token');
       if (savedToken) {
         this.authToken = savedToken;
-        const res = await fetch('/api/auth/me', {
+        const res = await this.apiFetch('/api/auth/me', {
           headers: {
             'Authorization': 'Bearer ' + savedToken,
             'x-auth-token': savedToken
@@ -5841,6 +5805,8 @@ const App = {
 
   showLoginScreen() {
     const screen = document.getElementById('login-screen');
+    document.querySelector('.app-container').inert = true;
+    document.querySelector('.gold-ticker-bar').inert = true;
     if (screen) {
       screen.classList.remove('hidden');
       screen.style.display = 'flex';
@@ -5850,6 +5816,8 @@ const App = {
   },
 
   hideLoginScreen() {
+    document.querySelector('.app-container').inert = false;
+    document.querySelector('.gold-ticker-bar').inert = false;
     const screen = document.getElementById('login-screen');
     if (screen) {
       screen.classList.add('hidden');
@@ -5880,14 +5848,14 @@ const App = {
         .toUpperCase();
       avatarEl.innerText = initials || 'NX';
       if (this.currentUser.roleColor) {
-        avatarEl.style.border = `2px solid ${this.currentUser.roleColor}`;
+        avatarEl.style.border = 'none';
       }
     }
     if (nameEl) nameEl.innerText = this.currentUser.name || this.currentUser.username;
     if (roleEl) {
       roleEl.innerText = this.currentUser.roleBadge || this.currentUser.roleName || this.currentUser.role;
       if (this.currentUser.roleColor) {
-        roleEl.style.color = this.currentUser.roleColor;
+        roleEl.style.color = 'var(--text-muted)';
       }
     }
   },
@@ -5918,20 +5886,23 @@ const App = {
     if (alertEl) alertEl.style.display = 'none';
 
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await this.apiFetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })
       }).then(r => r.json());
 
       if (res.success && res.token) {
+        this.clearSessionData();
         this.authToken = res.token;
         this.currentUser = res.user;
         this.currentPermissions = res.permissions || {};
         this.rolesCatalog = res.roles || {};
 
+        try {
         const remember = document.getElementById('login-remember')?.checked;
         if (remember) {
+          sessionStorage.removeItem('nexus_token');
           localStorage.setItem('nexus_token', res.token);
           localStorage.setItem('nexus_user', JSON.stringify(res.user));
         } else {
@@ -5939,6 +5910,8 @@ const App = {
           localStorage.removeItem('nexus_token');
         }
 
+        } catch(storageError) { /* Session remains valid in memory. */ }
+        await this.refreshAllData();
         this.showLoginAlert(`¡Acceso Concedido! Bienvenido, ${res.user.name}`, 'success');
         if (window.soundEngine) window.soundEngine.playChime();
 
@@ -5967,7 +5940,7 @@ const App = {
     } finally {
       if (btnSubmit) btnSubmit.disabled = false;
       if (spinner) spinner.style.display = 'none';
-      if (btnText) btnText.innerText = '🔐 Entrar a la Plataforma';
+      if (btnText) btnText.innerText = 'Entrar a mi espacio →';
     }
   },
 
@@ -5993,19 +5966,23 @@ const App = {
     if (!input) return;
     if (input.type === 'password') {
       input.type = 'text';
-      if (icon) icon.innerText = '🙈';
+      if (icon) icon.innerText = '';
+      const label = document.getElementById('login-pass-label');
+      if (label) label.textContent = 'Ocultar';
     } else {
       input.type = 'password';
-      if (icon) icon.innerText = '👁️';
+      if (icon) icon.innerText = '';
+      const label = document.getElementById('login-pass-label');
+      if (label) label.textContent = 'Mostrar';
     }
   },
 
   async logout() {
-    if (!confirm('¿Deseas cerrar tu sesión segura en Nexus por Mayor?')) return;
+    if (!confirm('¿Deseas cerrar tu sesión segura en Áurea Mayoristas?')) return;
 
     try {
       if (this.authToken) {
-        await fetch('/api/auth/logout', {
+        await this.apiFetch('/api/auth/logout', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -6021,7 +5998,7 @@ const App = {
     sessionStorage.removeItem('nexus_token');
     this.authToken = null;
     this.currentUser = null;
-    this.currentPermissions = {};
+    this.clearSessionData();
 
     const passInput = document.getElementById('login-password');
     if (passInput) passInput.value = '';
@@ -6086,14 +6063,14 @@ const App = {
 
     // Permissions matrix tab visibility in Usuarios view
     const tabMatriz = document.getElementById('tab-btn-permissions');
-    if (tabMatriz) tabMatriz.style.display = (canEditUsers || isSuperAdmin) ? '' : 'none';
+    if (tabMatriz) tabMatriz.style.display = isSuperAdmin ? '' : 'none';
   },
 
   async loadUsersAndRoles() {
     try {
       const [usersRes, rolesRes] = await Promise.all([
-        fetch('/api/users').then(r => r.json()),
-        fetch('/api/roles').then(r => r.json())
+        this.apiFetch('/api/users').then(r => r.json()),
+        this.apiFetch('/api/roles').then(r => r.json())
       ]);
 
       if (usersRes.success) {
@@ -6176,7 +6153,7 @@ const App = {
       tbody.innerHTML = `
         <tr>
           <td colspan="6" style="text-align: center; padding: 36px 20px; color: var(--text-dim);">
-            <div style="font-size: 2rem; margin-bottom: 8px;">👤</div>
+            <div style="font-size: 2rem; margin-bottom: 8px;"></div>
             <strong>No se encontraron usuarios con los filtros seleccionados</strong>
             <div style="font-size: 0.8rem; margin-top: 4px;">Modifica el término de búsqueda o añade un nuevo colaborador.</div>
           </td>
@@ -6193,14 +6170,14 @@ const App = {
       const roleObj = (this.rolesCatalog && this.rolesCatalog[u.role]) || {
         name: u.role,
         badge: u.role,
-        color: '#94a3b8'
+        color: '#a0afa4'
       };
 
       const isSuper = u.role === 'superadmin' || u.username === 'superadmin';
       const isActive = u.status === 'activo';
       const statusHtml = isActive
-        ? `<span class="status-dot-active">🟢 Activo</span>`
-        : `<span class="status-dot-inactive">🔴 Inactivo</span>`;
+        ? `<span class="status-dot-active"> Activo</span>`
+        : `<span class="status-dot-inactive"> Inactivo</span>`;
 
       let lastLoginText = 'Sin ingresos';
       if (u.lastLogin) {
@@ -6229,20 +6206,20 @@ const App = {
                 ${initials}
               </div>
               <div>
-                <strong style="color: var(--text-headings); font-size: 0.9rem; display: block;">${u.name}</strong>
-                <span class="mono" style="font-size: 0.76rem; color: var(--gold-light);">@${u.username}</span>
+                <strong style="color: var(--text-headings); font-size: 0.9rem; display: block;">${escapeHTML(u.name)}</strong>
+                <span class="mono" style="font-size: 0.76rem; color: var(--gold-light);">@${escapeHTML(u.username)}</span>
               </div>
             </div>
           </td>
           <td>
             <span class="role-pill-badge" style="color: ${roleObj.color || 'var(--gold-light)'}; background: ${roleObj.color ? roleObj.color + '15' : 'rgba(212,175,55,0.1)'};">
-              ${roleObj.badge || roleObj.name}
+              ${escapeHTML(roleObj.badge || roleObj.name)}
             </span>
           </td>
           <td>
             <div style="font-size: 0.82rem; color: var(--text-muted);">
               <div>${u.email || '<span style="color: var(--text-dim);">Sin correo</span>'}</div>
-              <div class="mono" style="font-size: 0.76rem; color: var(--text-dim); margin-top: 2px;">${u.phone || ''}</div>
+              <div class="mono" style="font-size: 0.76rem; color: var(--text-dim); margin-top: 2px;">${escapeHTML(u.phone || '')}</div>
             </div>
           </td>
           <td>
@@ -6254,21 +6231,21 @@ const App = {
           <td class="text-center" style="white-space: nowrap; padding: 12px 14px;">
             <div style="display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap;">
               <button type="button" class="btn btn-secondary btn-sm" onclick="App.editUser('${u.id}')" title="Editar datos del usuario" style="padding: 5px 10px; font-size: 0.76rem; display: inline-flex; align-items: center; gap: 4px;" ${!canEditUsers ? 'disabled' : ''}>
-                <span>✏️</span> Editar
+                <span></span> Editar
               </button>
               <button type="button" class="btn btn-outline-gold btn-sm" onclick="App.openChangePasswordModal('${u.id}')" title="Cambiar contraseña de acceso" style="padding: 5px 10px; font-size: 0.76rem; display: inline-flex; align-items: center; gap: 4px;" ${!canEditUsers ? 'disabled' : ''}>
-                <span>🔑</span> Clave
+                <span></span> Clave
               </button>
               ${isSuper ? `
                 <span class="user-master-badge" title="Super Administrador Principal - Acceso Master Protegido">
-                  <span>👑</span> Master
+                  <span></span> Master
                 </span>
               ` : `
                 <button type="button" class="btn ${isActive ? 'btn-outline-danger' : 'btn-outline-gold'} btn-sm" onclick="App.toggleUserStatus('${u.id}')" title="${isActive ? 'Desactivar acceso al sistema' : 'Reactivar acceso al sistema'}" style="padding: 5px 10px; font-size: 0.76rem; display: inline-flex; align-items: center; gap: 4px;" ${!canEditUsers ? 'disabled' : ''}>
-                  <span>${isActive ? '⏸️' : '▶️'}</span> ${isActive ? 'Desactivar' : 'Activar'}
+                  <span>${isActive ? '' : ''}</span> ${isActive ? 'Desactivar' : 'Activar'}
                 </button>
                 <button type="button" class="btn btn-outline-danger btn-sm" onclick="App.deleteUser('${u.id}')" title="Eliminar usuario definitivamente" style="padding: 5px 10px; font-size: 0.76rem; display: inline-flex; align-items: center; gap: 4px;" ${!canDeleteUsers ? 'disabled' : ''}>
-                  <span>🗑️</span> Borrar
+                  <span></span> Borrar
                 </button>
               `}
             </div>
@@ -6406,7 +6383,7 @@ const App = {
     try {
       let res;
       if (id) {
-        res = await fetch(`/api/users/${id}`, {
+        res = await this.apiFetch(`/api/users/${id}`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
@@ -6415,7 +6392,7 @@ const App = {
           body: JSON.stringify(payload)
         }).then(r => r.json());
       } else {
-        res = await fetch('/api/users', {
+        res = await this.apiFetch('/api/users', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -6458,7 +6435,7 @@ const App = {
     if (!confirm(confirmMsg)) return;
 
     try {
-      const res = await fetch(`/api/users/${userId}`, {
+      const res = await this.apiFetch(`/api/users/${userId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -6487,12 +6464,12 @@ const App = {
       return;
     }
 
-    if (!confirm(`⚠️ ¿ELIMINAR DEFINITIVAMENTE al usuario "${user.name}" (@${user.username})?\n\nEsta acción no se puede deshacer.`)) {
+    if (!confirm(` ¿ELIMINAR DEFINITIVAMENTE al usuario "${user.name}" (@${user.username})?\n\nEsta acción no se puede deshacer.`)) {
       return;
     }
 
     try {
-      const res = await fetch(`/api/users/${userId}`, {
+      const res = await this.apiFetch(`/api/users/${userId}`, {
         method: 'DELETE',
         headers: {
           'Authorization': 'Bearer ' + this.authToken
@@ -6548,7 +6525,7 @@ const App = {
     }
 
     try {
-      const res = await fetch(`/api/users/${id}`, {
+      const res = await this.apiFetch(`/api/users/${id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -6580,7 +6557,7 @@ const App = {
     const currentSelected = this.selectedMatrixRole || 'admin';
     selector.innerHTML = Object.keys(this.rolesCatalog).map(rKey => {
       const r = this.rolesCatalog[rKey];
-      return `<option value="${rKey}" ${rKey === currentSelected ? 'selected' : ''}>${r.badge || r.name}</option>`;
+      return `<option value="${rKey}" ${rKey === currentSelected ? 'selected' : ''}>${escapeHTML(r.badge || r.name)}</option>`;
     }).join('');
 
     this.selectRoleForMatrix(currentSelected);
@@ -6609,8 +6586,8 @@ const App = {
     if (saveBtn) {
       saveBtn.disabled = isProtected;
       saveBtn.innerText = isProtected
-        ? '🔒 Permisos Maestros Inmutables'
-        : '💾 Guardar Cambios de Permisos';
+        ? ' Permisos Maestros Inmutables'
+        : ' Guardar Cambios de Permisos';
     }
 
     this.renderPermissionsMatrix();
@@ -6632,9 +6609,9 @@ const App = {
         <tr style="transition: background 0.15s ease;">
           <td style="padding: 12px 16px;">
             <div style="display: flex; align-items: flex-start; gap: 10px;">
-              <span style="font-size: 1.3rem; line-height: 1.2;">${m.icon || '📦'}</span>
+              <span style="font-size: 1.3rem; line-height: 1.2;">${m.icon || ''}</span>
               <div>
-                <strong style="color: var(--text-headings); font-size: 0.9rem; display: block;">${m.name}</strong>
+                <strong style="color: var(--text-headings); font-size: 0.9rem; display: block;">${escapeHTML(m.name)}</strong>
                 <span style="font-size: 0.74rem; color: var(--text-dim); display: block; line-height: 1.3; margin-top: 2px;">${m.desc || ''}</span>
               </div>
             </div>
@@ -6736,7 +6713,7 @@ const App = {
     }
 
     try {
-      const res = await fetch('/api/roles').then(r => r.json());
+      const res = await this.apiFetch('/api/roles').then(r => r.json());
       if (res.success && res.roles && res.roles[roleKey]) {
         this.matrixDirtyPermissions = JSON.parse(JSON.stringify(res.roles[roleKey].permissions || {}));
         this.renderPermissionsMatrix();
@@ -6757,7 +6734,7 @@ const App = {
     const saveBtn = document.getElementById('btn-save-role-permissions');
     if (saveBtn) {
       saveBtn.disabled = true;
-      saveBtn.innerText = '⏳ Guardando Permisos...';
+      saveBtn.innerText = ' Guardando Permisos...';
     }
 
     try {
@@ -6765,7 +6742,7 @@ const App = {
       if (!updatedRoles[roleKey]) updatedRoles[roleKey] = {};
       updatedRoles[roleKey].permissions = this.matrixDirtyPermissions;
 
-      const res = await fetch('/api/roles', {
+      const res = await this.apiFetch('/api/roles', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -6795,7 +6772,7 @@ const App = {
     } finally {
       if (saveBtn) {
         saveBtn.disabled = false;
-        saveBtn.innerText = '💾 Guardar Cambios de Permisos';
+        saveBtn.innerText = ' Guardar Cambios de Permisos';
       }
     }
   }

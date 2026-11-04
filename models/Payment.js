@@ -11,6 +11,8 @@ const PaymentSchema = new mongoose.Schema({
   scrapGoldRate: { type: Number, default: 0 },
   scrapGoldEquivalent: { type: Number, default: 0 },
   totalCredited: { type: Number, default: 0 },
+  idempotencyKey: { type: String, default: undefined },
+  requestFingerprint: { type: String, default: undefined },
   paymentMethod: { type: String, default: 'Efectivo' },
   reference: { type: String, default: '' },
   notes: { type: String, default: '' }
